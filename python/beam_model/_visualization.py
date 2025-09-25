@@ -148,6 +148,7 @@ def plot_trajectory(
     transformed_markers,
     sim_markers,
     res_markers,
+    origin_markers,
     test_data_idx,
     real_frames,
     dt,
@@ -162,7 +163,7 @@ def plot_trajectory(
         linestyle="-",
         marker="o",
         markersize=0.5,
-        label=f"Simulation",
+        label=f"SysID",
         linewidth=2.0,
     )
     ax.plot(
@@ -183,13 +184,16 @@ def plot_trajectory(
         label=f"Real",
         linewidth=2.0,
     )
-    ax.legend(
-        loc="lower center",
-        bbox_to_anchor=[0.5, -0.35],
-        ncol=3,
-        fancybox=True,
-        shadow=True,
+    ax.plot(
+        times,
+        origin_markers[:real_frames, :, -1].mean(1)-offset,
+        linestyle="-",
+        marker="o",
+        markersize=0.5,
+        label=f"Original",
+        linewidth=2.0,
     )
+
     # ax.set_title(f"z axis")
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Displacement (m)")
@@ -199,8 +203,8 @@ def plot_trajectory(
     ax.set_axisbelow(True)
     ax.legend(
         loc="lower center",
-        bbox_to_anchor=[0.5, -0.35],
-        ncol=3,
+        bbox_to_anchor=[0.5, -0.55],
+        ncol=4,
         fancybox=True,
         shadow=True,
     )
@@ -255,7 +259,13 @@ def plot_forces_norm(
     ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
     ax.grid()
     ax.set_axisbelow(True)
-    ax.legend()
+    ax.legend(
+        loc="lower center",
+        bbox_to_anchor=[0.5, -0.55],
+        ncol=4,
+        fancybox=True,
+        shadow=True,
+    )
     plt.savefig(
         f"{vis_1d_folder}/residual_force_norm_{data_idx}.png",
         dpi=300,

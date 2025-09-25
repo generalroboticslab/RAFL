@@ -153,22 +153,6 @@ class CantileverEnv3d(EnvBase):
             [],
         )
 
-        #base mesh
-        cell_nums_base = (2,6,6)
-        cell_nums_base = (cell_nums_base[0]*refinement, cell_nums_base[1]*refinement, cell_nums_base[2]*refinement)
-        node_nums_base = (cell_nums_base[0] + 1, cell_nums_base[1] + 1, cell_nums_base[2] + 1)
-        dx_base = 0.01 / refinement
-        bin_file_name_base = "mesh_base.bin"
-        bin_file_name_base = Path(bin_file_name_base)
-        base_origin = ndarray([-0.1, 0.0, 0.0])
-        voxels_base = np.ones(cell_nums_base)
-        generate_hex_mesh(voxels_base, dx_base, origin, bin_file_name_base)
-        mesh_base = HexMesh3d()
-        mesh_base.Initialize(str(bin_file_name_base))
-        deformable_base = HexDeformable()
-        deformable_base.Initialize(
-            str(bin_file_name_base), density, "none", youngs_modulus, poissons_ratio
-        )
 
         # Initial state set by rotating the cuboid kinematically.
         dofs = deformable.dofs()

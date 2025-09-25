@@ -125,15 +125,6 @@ class ResidualPhysicsBase:
             f"{self.diffpd_model._folder}/validation_loss_history.npy",
             np.array(self.validation_loss_history),
         )
-        min_train_loss = (
-            np.min(self.total_loss_history)
-            if len(self.total_loss_history) > 0
-            else 1e10
-        )
-        if self.total_loss_history[-1] < min_train_loss:
-            self.epoch = epoch
-            self.training_time = time.time() - start_time
-            self.save_model(model_name="best_trained_model")
         if self.early_stopping_tolerance is not None:
             self.early_stopping(self.validation_loss_history)
 

@@ -27,27 +27,24 @@ if __name__ == "__main__":
         config["seed"] = 42
         config["epochs"] = 1000
         config["batch_size"] = 256
-        config["learning_rate"] = 1e-3#5e-6
+        config["learning_rate"] = 1e-3
         config["optimizer"] = "adam"
         config["start_frame"] = 0
         config["end_frame"] = 140
         config["training_set"] = [0, 3, 4, 6, 8, 10, 12, 13, 17]
         config["validate_set"] = [5, 15]
 
-        config["cuda"] = 2
-        config["normalize"] = True 
+        config["cuda"] = 0
+        config["normalize"] = False
         config["Inialization"] = 1e-3
         config["scale"] = 1#e6
         config["data_type"] = "optimized"
         config["weight_decay"] = 1e-5
         config["fit"] = "forces"
-        # config["fit"] = "SITL"
-        config["model"] = "skip_connection"
-        # config["model"] = "MLP"
-        config["num_mlp_blocks"] = 6
-        config["hidden_size"] = 64
-        config["num_hidden_layer"] = 3 
-        save_folder = f"training/test_refactor"
+        config["model"] = "element"
+        config["hidden_size"] = 128
+        config["num_hidden_layer"] = 4 
+        save_folder = f"training/test_refactor_element"
         config["data_folder"] = save_folder.replace("training/", "")
         cantilever_residual = CantileverResidualPhysics(config, save_folder, params)
         torch.manual_seed(config["seed"])

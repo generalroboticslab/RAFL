@@ -31,9 +31,6 @@ class CantileverResidualPhysics(ResidualPhysicsBase):
             self.residual_network = ResMLPResidual2(diffpd_model._dofs * 2, diffpd_model._dofs, hidden_size=config['hidden_size'], num_mlp_blocks=config['num_mlp_blocks'], num_block_layer=config['num_hidden_layer'])
         elif config["model"] == "element":
 
-            g = [0, 0, -9.80709]
-        
-
             la = (
                 diffpd_model._youngs_modulus
                 * diffpd_model._poissons_ratio
@@ -66,9 +63,9 @@ class CantileverResidualPhysics(ResidualPhysicsBase):
                                                     torch.tensor(rho), 
                                                     diffpd_model._q0, 
                                                     mesh.dx(),
-                                                    torch.tensor(g, dtype=torch.float64),
                                                     hidden_size=config['hidden_size'],
-                                                    num_hidden_layer=config['num_hidden_layer']
+                                                    num_hidden_layer=config['num_hidden_layer'],
+                                                    actuated=config['actuated']
                                                     )
 
         # Initialize dataset
@@ -135,6 +132,8 @@ class CantileverResidualPhysics(ResidualPhysicsBase):
         validation_loader,
     ):
         f_mean, f_std = torch.mean(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
+        #f_mean, f_std = torch.zeros(training_set.q_init.shape[0]), torch.std(training_set.fs.view(-1,3).norm(dim=-1,keepdim=True), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
+        print(f_std[:3])
         device = self.device
         with tqdm(total=self.epochs) as qbar:
             start_time = time.time()

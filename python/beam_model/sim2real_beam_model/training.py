@@ -34,7 +34,7 @@ if __name__ == "__main__":
         config["training_set"] = [0, 3, 4, 6, 8, 10, 12, 13, 17]
         config["validate_set"] = [5, 15]
 
-        config["cuda"] = 0
+        config["cuda"] = 5
         config["normalize"] = False
         config["Inialization"] = 1e-3
         config["scale"] = 1#e6
@@ -43,6 +43,7 @@ if __name__ == "__main__":
         config["fit"] = "forces"
         config["model"] = "element"
         config["hidden_size"] = 128
+        config["actuated"] = False
         config["num_hidden_layer"] = 4 
         save_folder = f"training/test_refactor_element"
         config["data_folder"] = save_folder.replace("training/", "")

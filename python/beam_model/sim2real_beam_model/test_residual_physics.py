@@ -77,9 +77,9 @@ def test_trajectory(
                                             torch.tensor(rho),
                                             cantilever._q0, 
                                             mesh.dx(),
-                                            torch.tensor(g, dtype=torch.float64),
                                             hidden_size=training_options['hidden_size'],
-                                            num_hidden_layer=training_options['num_hidden_layer']
+                                            num_hidden_layer=training_options['num_hidden_layer'],
+                                            actuated=training_options['actuated']
                                             )
 
     residual_network.load_state_dict(model["model"])
@@ -134,7 +134,8 @@ def test_trajectory(
     time_origin = 0
     time_network = 0
     f_mean, f_std = torch.mean(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
-        
+    #f_mean, f_std = torch.zeros(training_set.q_init.shape[0]), torch.std(training_set.fs.view(-1,3).norm(dim=-1,keepdim=True), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
+    #print(f_mean, f_std)
     for frame_i in range(1, end_frame):
         if normalize:
             ti = time.time()
@@ -182,9 +183,9 @@ def test_trajectory(
         except:
             print("Solver fails at frame", frame_i)
             break
-        if frame_i % 10 == 0:
-            cantilever.vis_dynamic_sim2real_markers(f"{save_folder.replace('training/', '')}/qs_res_{test_data_idx}", q_res.detach().numpy(), cantilever.get_markers_3d(q_res.reshape(-1,3)).detach().numpy(), transformed_markers[frame_i], frame=frame_i)
-            cantilever.vis_dynamic_sim2real_markers(f"{save_folder.replace('training/', '')}/qs_sim_{test_data_idx}", q_sim.detach().numpy(), cantilever.get_markers_3d(q_sim.reshape(-1,3)).detach().numpy(), transformed_markers[frame_i], frame=frame_i)
+        # if frame_i % 10 == 0:
+        #     cantilever.vis_dynamic_sim2real_markers(f"{save_folder.replace('training/', '')}/qs_res_{test_data_idx}", q_res.detach().numpy(), cantilever.get_markers_3d(q_res.reshape(-1,3)).detach().numpy(), transformed_markers[frame_i], frame=frame_i)
+        #     cantilever.vis_dynamic_sim2real_markers(f"{save_folder.replace('training/', '')}/qs_sim_{test_data_idx}", q_sim.detach().numpy(), cantilever.get_markers_3d(q_sim.reshape(-1,3)).detach().numpy(), transformed_markers[frame_i], frame=frame_i)
         qs_sim.append(q_sim.detach().numpy())
         qs_res.append(q_res.detach().numpy())
         vs_sim.append(v_sim.detach().numpy())
@@ -310,7 +311,7 @@ if __name__ == "__main__":
 
     cantilever.interpolate_markers_3d(q_.detach().numpy(), steady_state_transformed)
 
-    save_folder = f"training/test_refactor_skip_connection"
+    save_folder = f"training/test_refactor_element"
     sim_errors = []
     res_errors = []
     origin_errors = []

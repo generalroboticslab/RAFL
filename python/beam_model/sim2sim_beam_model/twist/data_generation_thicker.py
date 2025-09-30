@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 
 # from twist_beam_env import CantileverEnv3d
-from env_cantilever import CantileverEnv3d
+from env_cantilever_thicker import ThickerCantileverEnv3d
 
 
 
@@ -20,7 +20,7 @@ def data_generate(sample_num, frame_num, hex_params, vis=True):
         qs = []
         vs = []
         hex_params["twist_angle"] = twist_angle
-        env = CantileverEnv3d(
+        env = ThickerCantileverEnv3d(
             seed,
             folder,
             hex_params,
@@ -72,7 +72,7 @@ def data_generate(sample_num, frame_num, hex_params, vis=True):
         qs.append(qv["q"])
         vs.append(qv["v"])
         data = {"q": np.stack(qs), "v": np.stack(vs)}
-        data_folder = 'data_real'
+        data_folder = 'thicker_data_real'
         Path(f"{data_folder}").mkdir(parents=True, exist_ok=True)
         np.save(f"{data_folder}/trajectory{idx}.npy", data)
 

@@ -13,7 +13,7 @@ from py_diff_pd.common.common import create_folder, ndarray
 from py_diff_pd.common.hex_mesh import generate_hex_mesh
 from py_diff_pd.core.py_diff_pd_core import HexMesh3d, HexDeformable
 
-class CantileverEnv3d (EnvBase):
+class ShorterCantileverEnv3d (EnvBase):
     # Refinement is an integer controlling the resolution of the mesh.
     def __init__(self, seed, folder, options):
         EnvBase.__init__(self, folder)
@@ -45,10 +45,10 @@ class CantileverEnv3d (EnvBase):
         mu = youngs_modulus / (2 * (1 + poissons_ratio))
 
         ### Mesh Parameters
-        # Cantilever is 0.1m long, 0.03m wide, and 0.03m tall
+        # Cantilever is 0.05m long, 0.03m wide, and 0.03m tall
         dx = 0.01 / refinement
-        cell_nums = (round(0.1 / dx), round(0.03 / dx), round(0.03 / dx))
-        assert cell_nums[0] * dx == 0.1 and cell_nums[1] * dx == 0.03, "Refinement does not properly divide the cantilever dimensions!" 
+        cell_nums = (round(0.05 / dx), round(0.03 / dx), round(0.03 / dx))
+        assert cell_nums[0] * dx == 0.05 and cell_nums[1] * dx == 0.03, "Refinement does not properly divide the cantilever dimensions!" 
         origin = ndarray([0.0, 0.0, 0.0])
 
         bin_file_name = folder + "mesh.bin"

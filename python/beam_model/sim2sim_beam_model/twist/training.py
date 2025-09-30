@@ -40,21 +40,22 @@ if __name__ == "__main__":
         config["training_set"] = list(range(10))
         config["validate_set"] = [10,11]
 
-        config["cuda"] = 2
-        config["normalize"] = True 
+        config["cuda"] = 0
+        config["normalize"] = False 
         config["Inialization"] = 1e-3
         config["scale"] = 1#e6
         config["data_type"] = "optimized"
         config["weight_decay"] = 1e-5
         config["fit"] = "forces"
         # config["fit"] = "SITL"
-        config["model"] = "skip_connection"
+        config["model"] = "element" #"skip_connection"
         # config["model"] = "MLP"
         config["num_mlp_blocks"] = 5
-        config["hidden_size"] = 512
-        config["num_hidden_layer"] = 3
+        config["hidden_size"] = 128 #512
+        config["actuated"] = False
+        config["num_hidden_layer"] = 4 #3
         # save_folder = f"training/sim2simResMLP5"
-        save_folder = f"training/test_refactor"
+        save_folder = f"training/test_refactor_element_noRelwBias"
         config["data_folder"] = save_folder.replace("training/", "")
         cantilever_residual = CantileverResidualPhysics(config, save_folder, params)
         torch.manual_seed(config["seed"])

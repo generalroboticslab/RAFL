@@ -12,6 +12,7 @@ import argparse
 from _utils import CantileverDataset
 from _visualization import plot_trajectory, plot_forces_norm
 from env_cantilever import CantileverEnv3d
+from env_cantilever_longer import LongerCantileverEnv3d
 from residual_physics.network import ResMLPResidual2, MLPResidual
 from residual_physics.element_force import ElementResidual
 from py_diff_pd.common.common import ndarray
@@ -20,7 +21,7 @@ args = argparse.ArgumentParser()
 args.add_argument("-model", dest="model", required=False)
 
 def test_trajectory(
-    cantilever:CantileverEnv3d, save_folder, test_data_idx,  start_frame=0, end_frame=150, cantilever_sim=None,
+    cantilever:LongerCantileverEnv3d, save_folder, test_data_idx,  start_frame=0, end_frame=150, cantilever_sim=None,default_cantilever=None
 ):
     if cantilever_sim is None:
         cantilever_sim = cantilever
@@ -78,28 +79,28 @@ def test_trajectory(
     model = torch.load(f"{save_folder}/{model_input}.pth", map_location=device)
 
     # create new OrderedDict that does not contain `module.`
-    if 'module' in list(model['model'].keys())[0]:
-        from collections import OrderedDict
-        new_state_dict = OrderedDict()
-        for k, v in model['model'].items():
-            name = k[7:] # remove `module.`
+    from collections import OrderedDict
+    new_state_dict = OrderedDict()
+    for k, v in model['model'].items():
+        if 'unmodelled_nn' in k:
+            name = k 
             new_state_dict[name] = v
-        model['model'] = new_state_dict
+    model['model'] = new_state_dict
 
-    residual_network.load_state_dict(model["model"])
+    residual_network.load_state_dict(model["model"], strict=False)
     print("The model saves at epoch", model["epoch"])
     residual_network.eval()
 
     ground_truth = np.load(
-        f"cantilever_data_sim2sim/optimized_data_{test_data_idx}.npy",
+        f"longer_cantilever_data_sim2sim/optimized_data_{test_data_idx}.npy",
         allow_pickle=True,
     )[()]
-    f_optimized = torch.from_numpy(ground_truth["optimized_forces"]).t()[1:]
+    #f_optimized = torch.from_numpy(ground_truth["optimized_forces"]).t()[1:]
     loss_fn = torch.nn.MSELoss(reduction="mean")
 
     training_set = CantileverDataset(
     training_options["training_set"],
-    cantilever._q0,
+    default_cantilever._q0,
     f"cantilever_data_sim2sim",
     start_frame=training_options["start_frame"],
     end_frame=training_options["end_frame"],
@@ -125,7 +126,7 @@ def test_trajectory(
     predicted_residual_force_norms = []
     ground_truth_residual_force_norms = []
     normalize = training_options["normalize"]
-    f_mean, f_std = torch.mean(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
+    f_mean, f_std = torch.mean(training_set.fs.view(-1,3), dim=0).expand(q0.shape[0] // 3, 3).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(q0.shape[0] // 3, 3).flatten()
     
     for frame_i in range(1, end_frame):
         if normalize:
@@ -147,14 +148,14 @@ def test_trajectory(
             res_force = training_set.denormalize(f=res_force_normalized, normalization_params=(None, None, None, None, f_mean, f_std))[0]
         #print(res_force.norm())
         #print(f_optimized[frame_i - 1, :].norm())
-        res_force_error = torch.norm(res_force - f_optimized[frame_i - 1, :])
+        #res_force_error = torch.norm(res_force - f_optimized[frame_i - 1, :])
         #print(res_force_error)
         #print()
         predicted_residual_force_norms.append(torch.norm(res_force).item())
-        res_force_errors.append(res_force_error.item())
-        ground_truth_residual_force_norms.append(
-            torch.norm(f_optimized[frame_i - 1, :]).item()
-        )
+        #res_force_errors.append(res_force_error.item())
+        # ground_truth_residual_force_norms.append(
+        #     torch.norm(f_optimized[frame_i - 1, :]).item()
+        # )
         try:
             q_res, v_res = cantilever.forward(
                 q_res, v_res, f_ext=res_force, dt=0.01
@@ -167,16 +168,16 @@ def test_trajectory(
         qs_res.append(q_res.detach().numpy())
         vs_sim.append(v_sim.detach().numpy())
         vs_res.append(v_res.detach().numpy())
-    np.save(f"{save_folder}/qs_sim_{test_data_idx}.npy", qs_sim)
-    np.save(f"{save_folder}/qs_res_{test_data_idx}.npy", qs_res)
-    np.save(f"{save_folder}/vs_sim_{test_data_idx}.npy", vs_sim)
-    np.save(f"{save_folder}/vs_res_{test_data_idx}.npy", vs_res)
+    np.save(f"{save_folder}/longer/qs_sim_{test_data_idx}.npy", qs_sim)
+    np.save(f"{save_folder}/longer/qs_res_{test_data_idx}.npy", qs_res)
+    np.save(f"{save_folder}/longer/vs_sim_{test_data_idx}.npy", vs_sim)
+    np.save(f"{save_folder}/longer/vs_res_{test_data_idx}.npy", vs_res)
     qs_sim = np.array(qs_sim)
     qs_res = np.array(qs_res)
     qs_ground_truth = np.array(ground_truth["q_trajectory"])
 
     pairs = [[0, 5], [1, 4], [2, 2], [3, 0], [4, 1], [5, 3]]
-    vis_1d_folder = f"sim2sim/{save_folder.replace('training/', '')}_{model_input}"
+    vis_1d_folder = f"longer_sim2sim/{save_folder.replace('training/', '')}_{model_input}"
     os.makedirs(vis_1d_folder, exist_ok=True)
     mm = 1.5 / 25.4
     sim_frames = qs_sim.shape[0]
@@ -188,8 +189,8 @@ def test_trajectory(
     qs_ground_truth = qs_ground_truth.reshape(qs_ground_truth.shape[0], -1,3)
     sim_error = np.linalg.norm(qs_sim[:real_frames] - qs_ground_truth[:real_frames], axis=-1)
     res_error = np.linalg.norm(qs_res[:real_frames] - qs_ground_truth[:real_frames], axis=-1)
-    predicted_residual_force_norms = np.array(predicted_residual_force_norms)
-    res_force_errors = np.array(res_force_errors)
+    #predicted_residual_force_norms = np.array(predicted_residual_force_norms)
+    #res_force_errors = np.array(res_force_errors)
     print(
         f"test id {test_data_idx} sim error {sim_error.mean()*1e3:.3f}mm +-  {sim_error.mean(-1).std()*1e3:.3f} mm"
     )
@@ -208,14 +209,14 @@ def test_trajectory(
         real_frames,
         dt,
     )
-    plot_forces_norm(
-        vis_1d_folder,
-        test_data_idx,
-        figsize,
-        predicted_residual_force_norms,
-        ground_truth_residual_force_norms,
-        dt,
-    )
+    # plot_forces_norm(
+    #     vis_1d_folder,
+    #     test_data_idx,
+    #     figsize,
+    #     predicted_residual_force_norms,
+    #     ground_truth_residual_force_norms,
+    #     dt,
+    # )
 
     return sim_error, res_error
 
@@ -233,16 +234,18 @@ if __name__ == "__main__":
         'mesh_type': 'hex',
         'refinement': 1,
     }
-    cantilever = CantileverEnv3d(42, 'beam', hex_params)
+    cantilever = LongerCantileverEnv3d(42, 'beam', hex_params)
+    default_cantilever = CantileverEnv3d(42, 'beam', hex_params)
     q_init = torch.from_numpy(cantilever._q0)
 
     save_folder = f"training/test_refactor_element"
+    os.makedirs(f"{save_folder}/longer/", exist_ok=True)
     sim_errors = []
     res_errors = []
-    for test_i in range(12,20):
+    for test_i in range(20):
         print(f"test id {test_i}")
         sim_error, res_error = test_trajectory(
-            cantilever, save_folder, test_i, end_frame=100, cantilever_sim=cantilever
+            cantilever, save_folder, test_i, end_frame=100, cantilever_sim=cantilever, default_cantilever=default_cantilever
         )
         sim_errors.append(sim_error)
         res_errors.append(res_error)
@@ -256,5 +259,5 @@ if __name__ == "__main__":
     print("Frame error: \n")
     print(f"sim error {sim_errors.mean(-1).flatten().mean() *1000 :.3f}mm +-  {sim_errors.mean(-1).flatten().std() * 1000:.3f} mm")
     print(f"res error {res_errors.mean(-1).flatten().mean() * 1000:.3f}mm +-  {res_errors.mean(-1).flatten().std() * 1000:.3f} mm")
-    np.save(f"{save_folder}/sim_errors_residual_network.npy", sim_errors)
-    np.save(f"{save_folder}/res_errors_residual_network.npy", res_errors)
+    np.save(f"{save_folder}/longer/res_errors_residual_network.npy", sim_errors)
+    np.save(f"{save_folder}/longer/res_errors_residual_network.npy", res_errors)

@@ -9,9 +9,9 @@ import torch
 from env_cantilever import CantileverEnv3d
 
 def optimize_trajectoryfull(cantilever:CantileverEnv3d, num_frames, num_epochs, dt, sample=0, suffix = "fix_registration"):
-    folder = 'trajectoryfull'
-    beam_folder = f'test{idx}'
-    Path(beam_folder+ '/'+ folder).mkdir(parents=True,exist_ok=True)
+    # folder = 'trajectoryfull'
+    # beam_folder = f'test{idx}'
+    # Path(beam_folder+ '/'+ folder).mkdir(parents=True,exist_ok=True)
     force_nodes_num = cantilever._dofs
     params = torch.normal(0, 1e-4, [force_nodes_num, num_frames], dtype=torch.float64, requires_grad=True)
     target_trajectory = torch.from_numpy(np.load(f"data_real/trajectory{sample}.npy", allow_pickle=True)[()]['q'])[0]

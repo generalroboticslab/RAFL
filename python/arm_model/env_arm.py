@@ -66,7 +66,8 @@ class ArmEnv(EnvBase):
 
         ### Create Mesh
         arm_mesh = meshio.read(arm_file)
-        tmp_bin_file_name = ".tmp.bin"
+        local_rank = int(os.environ["LOCAL_RANK"]) if "LOCAL_RANK" in os.environ else 0
+        tmp_bin_file_name = f".tmp{local_rank}.bin"
         if "Segment" in arm_file:
             generate_tet_mesh(
                 arm_mesh.points * 1e-3, arm_mesh.cells[-1].data, tmp_bin_file_name

@@ -19,7 +19,7 @@ class ThinnerCantileverEnv3d (EnvBase):
         EnvBase.__init__(self, folder)
 
         np.random.seed(seed)
-        #create_folder(folder, exist_ok=True)
+        create_folder(folder, exist_ok=True)
 
         refinement = options["refinement"] if "refinement" in options else 2
         youngs_modulus = (

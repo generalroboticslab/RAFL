@@ -13,12 +13,12 @@ import argparse
 from markermatch import init_realdata, init_simenv
 from _utils import ArmDataset
 from residual_physics.network import MLPResidual, ResMLPResidual2
+from residual_physics.element_force import ElementResidual
+from py_diff_pd.common.common import ndarray
 
-args = argparse.ArgumentParser()
-args.add_argument("-model", dest="model", required=False)
 
 def test_trajectory(
-    sopra_env, save_folder, test_data_idx, transformed_markers, real_p, fitting_options,  start_frame=0, end_frame=999
+    sopra_env, save_folder, test_data_idx, transformed_markers, real_p, fitting_options,  start_frame=0, end_frame=999, sopra_env_sim=None
 ):
     print("Testing trajectory", test_data_idx)
     training_options = yaml.safe_load(open(f"{save_folder}/config.yaml"))
@@ -26,13 +26,47 @@ def test_trajectory(
         residual_network = ResMLPResidual2(sopra_env._dofs * 3, sopra_env._dofs, num_mlp_blocks=training_options['num_mlp_blocks'], num_block_layer=training_options['num_block_layer'])
     elif training_options['model'] == "mlp":
         residual_network = MLPResidual(sopra_env._dofs * 3, sopra_env._dofs, hidden_sizes=training_options['hidden_sizes'])
-    
+    elif training_options['model'] == 'element':
+        g = training_options['state_force_parameters']
+
+        la = (
+                sopra_env._youngs_modulus
+                * sopra_env._poissons_ratio
+                / ((1 + sopra_env._poissons_ratio) * (1 - 2 * sopra_env._poissons_ratio))
+            )
+        m = sopra_env._youngs_modulus / (2 * (1 + sopra_env._poissons_ratio))
+
+        mesh = sopra_env._deformable.mesh()
+
+        elements = []
+        mu = []
+        lam = []
+        rho = []
+        num_elements = mesh.NumOfElements()
+        for e in range(num_elements):
+            elements.append(mesh.py_element(e))
+            mu.append(m)
+            lam.append(la)
+            rho.append(sopra_env._deformable.density())
+        
+        elements = ndarray(elements)
+        mu = ndarray(mu)
+        lam = ndarray(lam)
+        rho = ndarray(rho)
+
+        residual_network = ElementResidual(sopra_env._dofs, 
+                                            torch.tensor(elements), 
+                                            torch.tensor(mu), 
+                                            torch.tensor(lam), 
+                                            torch.tensor(rho),
+                                            torch.tensor(sopra_env._q0), 
+                                            None,
+                                            hidden_size=training_options['hidden_size'],
+                                            num_hidden_layer=training_options['num_hidden_layer'],
+                                            actuated=training_options['actuated']
+                                            )
     model = torch.load(f"{save_folder}/residual_network.pth")
-    model_input = args.parse_args().model
-    if model_input == "residual":
-        model_input = f"residual_network"
-    else:
-        model_input = f"best_trained_model"
+    model_input = f"residual_network"
     print(model_input)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = torch.load(f"{save_folder}/{model_input}.pth", map_location=device)
@@ -47,6 +81,7 @@ def test_trajectory(
         model['model'] = new_state_dict
 
     residual_network.load_state_dict(model["model"])
+    print("The model saves at epoch", model["epoch"])
     residual_network.eval()
 
     pairs = [[0, 5], [1, 4], [2, 2], [3, 0], [4, 1], [5, 3]]
@@ -83,11 +118,13 @@ def test_trajectory(
     res_force_errors = []
     predicted_residual_force_norms = []
     ground_truth_residual_force_norms = []
-    normalize = True
+    normalize = training_options["normalize"]
+    #f_mean, f_std = torch.mean(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
+    f_mean, f_std = torch.zeros(training_set.q_init.shape[0]).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
     for frame_i in range(1, end_frame):
         start_time = time.time()
         pressure = real_p[frame_i - 1]
-        f_ext_sim = sopra_env.apply_inner_pressure(
+        f_ext_sim = sopra_env_sim.apply_inner_pressure(
             pressure, q_sim.detach().numpy(), chambers=real_chambers
         )
         f_ext_res = sopra_env.apply_inner_pressure(
@@ -113,17 +150,18 @@ def test_trajectory(
             res_force_error = loss_fn(res_force_normalized, f_res_normalized_gt)
             res_force = training_set.denormalize(f=res_force_normalized)[0]
         else:
-            res_force = residual_network(
-                torch.cat((q_res - q_init, v_res, f_ext_res), dim=0)
-            )
-        res_force_error = torch.norm(res_force - f_optimized[frame_i - 1, :])
+            res_force_normalized = residual_network(
+                torch.cat((q_res, v_res, f_ext_res), dim=0)
+            )[0]
+            res_force = training_set.denormalize(f=res_force_normalized, normalization_params=(None, None, None, None, None, None, f_mean, f_std))[0]
+            res_force_error = torch.norm(res_force - f_optimized[frame_i - 1, :])
         predicted_residual_force_norms.append(torch.norm(res_force).item())
         res_force_errors.append(res_force_error.item())
         ground_truth_residual_force_norms.append(
             torch.norm(f_optimized[frame_i - 1, :]).item()
         )
         try:
-            q_sim, v_sim = sopra_env.forward(q_sim, v_sim, f_ext=f_ext_sim, dt=0.01)
+            q_sim, v_sim = sopra_env_sim.forward(q_sim, v_sim, f_ext=f_ext_sim, dt=0.01)
             q_res, v_res = sopra_env.forward(
                 q_res, v_res, f_ext=f_ext_res + res_force, dt=0.01
             )
@@ -363,10 +401,13 @@ if __name__ == "__main__":
     model = f"../sopra_model/{model_name}.vtk"
 
     options = {}
+    options["poissons_ratio"] =  0.4194
+    options["youngs_modulus"] = 237629.9
+    sopra_env_sim, _, _ = init_simenv(model, arm_folder, options)
+
+    options = {}
     options["poissons_ratio"] = 0.45
     options["youngs_modulus"] = 215856
-    # options["poissons_ratio"] =  0.4194
-    # options["youngs_modulus"] = 237629.9
     sopra_env, method, opt = init_simenv(model, arm_folder, options)
 
     sopra_env.set_measured_markers()
@@ -392,23 +433,23 @@ if __name__ == "__main__":
             for lr in lrs:
                 for step in steps:
                     for gamma in gammas:
-                        save_folder = f"hyperparam_search/learning_rate_1.000E-03_numblocks_5_num_layers_3_hidden_size_512"
+                        save_folder = f"training/test_refactor_element" #f"hyperparam_search/learning_rate_1.000E-03_numblocks_5_num_layers_3_hidden_size_512"
                         sim_errors = []
                         res_errors = []
                         for i in range(180,200):
                             sim_error, res_error = test_trajectory(
-                                sopra_env, save_folder, i, transformed_markers[i], real_p[i], "force", end_frame=999
+                                sopra_env, save_folder, i, transformed_markers[i], real_p[i], "force", end_frame=999, sopra_env_sim=sopra_env_sim
                             )
                             sim_errors.append(sim_error)
                             res_errors.append(res_error)
                         sim_errors = np.array(sim_errors)
                         res_errors = np.array(res_errors)
-                        sim_error_mean = sim_errors.mean(axis=-1).mean(axis=-1)
-                        res_error_mean = res_errors.mean(axis=-1).mean(axis=-1)
-                        print(f"sim error {sim_error_mean.mean() *1000 :.3f}mm +-  {sim_error_mean.std() * 1000:.3f} mm")
+                        sim_error_mean = sim_errors.mean(axis=-1) #.mean(axis=-1)
+                        res_error_mean = res_errors.mean(axis=-1) #.mean(axis=-1)
+                        print(f"sim error {sim_error_mean.mean() * 1000 :.3f}mm +-  {sim_error_mean.std() * 1000:.3f} mm")
                         print(f"res error {res_error_mean.mean() * 1000:.3f}mm +-  {res_error_mean.std() * 1000:.3f} mm")
-                        np.save(f"{save_folder}/sim_errors_{args.parse_args().model}.npy", sim_errors)
-                        np.save(f"{save_folder}/res_errors_{args.parse_args().model}.npy", res_errors)
+                        np.save(f"{save_folder}/sim_errors_residual_network.npy", sim_errors)
+                        np.save(f"{save_folder}/res_errors_residual_network.npy", res_errors)
                         errors_all.append([res_error_mean.mean(), res_error_mean.std()])
                         errors_all = np.array(errors_all)
                         np.save(f"errors_None.npy", np.array(errors_all))

@@ -13,8 +13,8 @@ args.add_argument("-t", dest="save_folder", required=False)
 
 
 if __name__ == '__main__':
-    youngs_modulus = 215856
-    poissons_ratio = 0.45
+    youngs_modulus = 263824
+    poissons_ratio = 0.499
     density = 1.07e3
     state_force = [0, 0, -9.80709]
     hex_params = {

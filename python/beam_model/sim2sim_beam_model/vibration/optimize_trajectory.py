@@ -71,7 +71,7 @@ def optimize_trajectoryfull(cantilever:CantileverEnv3d, num_frames, num_epochs, 
 
 if __name__ == '__main__':
     weights = [0.05, 0.06, 0.07, 0.1, 0.09, 0.08, 0.11, 0.12, 0.15, 0.09, 0.13, 0.14, 0.16, 0.17, 0.2,0.18,0.22,0.21]
-    idxs = [0,3,4,5,6,8,10,12,13,15,17]
+    idxs = [0,2,3,4,5,6,7,8,10,11,12,13,14,15,16,17]
     for idx in idxs:
         youngs_modulus = 215856
         poissons_ratio = 0.45
@@ -85,7 +85,7 @@ if __name__ == '__main__':
             'mesh_type': 'hex',
             'refinement': 1,
         }
-        cantilever = CantileverEnv3d(42, f'test{idx}', hex_params)
+        cantilever = CantileverEnv3d(42, 'data_real', hex_params)
 
         ########################################
         num_frames = 150

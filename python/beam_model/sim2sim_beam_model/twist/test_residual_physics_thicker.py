@@ -126,8 +126,8 @@ def test_trajectory(
     predicted_residual_force_norms = []
     ground_truth_residual_force_norms = []
     normalize = training_options["normalize"]
-    f_mean, f_std = torch.mean(training_set.fs.view(-1,3), dim=0).expand(q0.shape[0] // 3, 3).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(q0.shape[0] // 3, 3).flatten()
-    
+    #f_mean, f_std = torch.mean(training_set.fs.view(-1,3), dim=0).expand(q0.shape[0] // 3, 3).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(q0.shape[0] // 3, 3).flatten()
+    f_mean, f_std = torch.zeros(q0.shape[0]).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(q0.shape[0] // 3, 3).flatten()
     for frame_i in range(1, end_frame):
         if normalize:
             (
@@ -238,11 +238,11 @@ if __name__ == "__main__":
     default_cantilever = CantileverEnv3d(42, 'beam', hex_params)
     q_init = torch.from_numpy(cantilever._q0)
 
-    save_folder = f"training/test_refactor_element"
+    save_folder = f"training/test_refactor_element_new"
     os.makedirs(f"{save_folder}/thicker/", exist_ok=True)
     sim_errors = []
     res_errors = []
-    for test_i in range(20):
+    for test_i in range(12,20):
         print(f"test id {test_i}")
         sim_error, res_error = test_trajectory(
             cantilever, save_folder, test_i, end_frame=100, cantilever_sim=cantilever, default_cantilever=default_cantilever

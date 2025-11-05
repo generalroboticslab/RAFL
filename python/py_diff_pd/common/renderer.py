@@ -14,7 +14,7 @@ from py_diff_pd.common.project_path import root_path
 # This class assumes z is pointing up.
 class PbrtRenderer(object):
     def __init__(self, options=None):
-        self.__temporary_folder = Path('.tmp')
+        self.__temporary_folder = Path(f'{options["parent_dir"]}.tmp') if options is not None and "parent_dir" in options else Path('.tmp')
         create_folder(self.__temporary_folder)
         if options is None: options = {}
 

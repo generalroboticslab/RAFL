@@ -43,9 +43,9 @@ if __name__ == "__main__":
         config["fit"] = "forces"
         config["model"] = "element"
         config["hidden_size"] = 128
-        config["actuated"] = False
+        config["actuated"] = True
         config["num_hidden_layer"] = 4 
-        save_folder = f"training/test_refactor_element"
+        save_folder = f"training/test_refactor_element_stress"
         config["data_folder"] = save_folder.replace("training/", "")
         cantilever_residual = CantileverResidualPhysics(config, save_folder, params)
         torch.manual_seed(config["seed"])

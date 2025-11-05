@@ -51,11 +51,11 @@ if __name__ == "__main__":
         config["model"] = "element" #"skip_connection"
         # config["model"] = "MLP"
         config["num_mlp_blocks"] = 5
-        config["hidden_size"] = 128 #512
-        config["actuated"] = False
+        config["hidden_size"] = 64 #512
+        config["actuated"] = True
         config["num_hidden_layer"] = 4 #3
         # save_folder = f"training/sim2simResMLP5"
-        save_folder = f"training/test_refactor_element_noRelwBias"
+        save_folder = f"training/test_refactor_element_new"
         config["data_folder"] = save_folder.replace("training/", "")
         cantilever_residual = CantileverResidualPhysics(config, save_folder, params)
         torch.manual_seed(config["seed"])

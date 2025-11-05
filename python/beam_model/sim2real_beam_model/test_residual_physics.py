@@ -133,9 +133,14 @@ def test_trajectory(
     time_res = 0
     time_origin = 0
     time_network = 0
-    f_mean, f_std = torch.mean(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
-    #f_mean, f_std = torch.zeros(training_set.q_init.shape[0]), torch.std(training_set.fs.view(-1,3).norm(dim=-1,keepdim=True), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
-    #print(f_mean, f_std)
+    #f_mean, f_std = torch.mean(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
+    f_mean, f_std = torch.zeros(training_set.q_init.shape[0]).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
+    #f_mean, f_std = torch.zeros(training_set.q_init.shape[0]).flatten(), torch.max(training_set.fs.view(-1,3).norm(dim=1), dim=0)[0].expand(training_set.q_init.shape[0])
+    #f_mean, f_std = torch.zeros(training_set.q_init.shape[0]).flatten(), torch.mean(torch.abs(training_set.fs.view(-1,3)), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
+    # print(f_std[:3])
+    # exit()
+
+    #print(residual_network.unmodelled_nn(torch.zeros(13, dtype=torch.float64), torch.zeros(14, dtype=torch.float64), torch.zeros(4, dtype=torch.float64), torch.zeros(11, dtype=torch.float64), torch.zeros(3, dtype=torch.float64)))
     for frame_i in range(1, end_frame):
         if normalize:
             ti = time.time()
@@ -311,7 +316,7 @@ if __name__ == "__main__":
 
     cantilever.interpolate_markers_3d(q_.detach().numpy(), steady_state_transformed)
 
-    save_folder = f"training/test_refactor_element"
+    save_folder = f"training/test_refactor_element_new"
     sim_errors = []
     res_errors = []
     origin_errors = []

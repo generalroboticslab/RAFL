@@ -152,15 +152,18 @@ def plot_trajectory(
     test_data_idx,
     real_frames,
     dt,
+    dim=-1
 ):
     mm = 1.5 / 25.4
     fig, ax = plt.subplots(ncols=1, figsize=figsize)
     times = np.linspace(0, real_frames * dt, real_frames + 1)[:-1]
-    offset = transformed_markers[:real_frames, :, -1].mean(1)[0]
+
+    offset = transformed_markers[:real_frames, :, dim].mean(1)[0]
+
     if sim_markers is not None:
         ax.plot(
             times,
-            sim_markers[:real_frames, :, -1].mean(1)-offset,
+            sim_markers[:real_frames, :, dim].mean(1)-offset,
             linestyle="-",
             marker="o",
             markersize=0.5,
@@ -169,7 +172,7 @@ def plot_trajectory(
         )
     ax.plot(
         times,
-        res_markers[:real_frames, :, -1].mean(1)-offset,
+        res_markers[:real_frames, :, dim].mean(1)-offset,
         linestyle="-",
         marker="o",
         markersize=0.5,
@@ -178,7 +181,7 @@ def plot_trajectory(
     )
     ax.plot(
         times,
-        transformed_markers[:real_frames, :, -1].mean(1)-offset,
+        transformed_markers[:real_frames, :, dim].mean(1)-offset,
         linestyle="--",
         marker="o",
         markersize=0.5,
@@ -188,7 +191,7 @@ def plot_trajectory(
 
     ax.plot(
         times,
-        origin_markers[:real_frames, :, -1].mean(1)-offset,
+        origin_markers[:real_frames, :, dim].mean(1)-offset,
         linestyle="-",
         marker="o",
         markersize=0.5,

@@ -14,6 +14,9 @@ from _utils import CantileverDataset
 from _visualization import plot_trajectory, plot_forces_norm
 from env_cantilever import CantileverEnv3d
 from residual_physics.network import ResMLPResidual2, MLPResidual
+from residual_physics.element_force import ElementResidual
+from py_diff_pd.common.common import ndarray
+from video_generation import *
 
 args = argparse.ArgumentParser()
 args.add_argument("-model", dest="model", required=False)
@@ -29,12 +32,47 @@ def test_trajectory(
         residual_network = ResMLPResidual2(dofs * 2, dofs, hidden_size=training_options['hidden_size'], num_mlp_blocks=training_options['num_mlp_blocks'], num_block_layer=training_options['num_hidden_layer'])
     elif training_options["model"] == "MLP":
         residual_network = MLPResidual(dofs*2, dofs)
+    elif training_options['model'] == 'element':
+        youngs_modulus = 215856
+        poissons_ratio = 0.45
+        la = (
+            youngs_modulus
+            * poissons_ratio
+            / ((1 + poissons_ratio) * (1 - 2 * poissons_ratio))
+        )
+        m = youngs_modulus / (2 * (1 + poissons_ratio))
+
+        mesh = cantilever._deformable.mesh()
+
+        elements = []
+        mu = []
+        lam = []
+        rho = []
+        num_elements = mesh.NumOfElements()
+        for e in range(num_elements):
+            elements.append(mesh.py_element(e))
+            mu.append(m)
+            lam.append(la)
+            rho.append(cantilever._deformable.density())
+        
+        elements = ndarray(elements)
+        mu = ndarray(mu)
+        lam = ndarray(lam)
+        rho = ndarray(rho)
+
+        residual_network = ElementResidual(cantilever._dofs, 
+                                            torch.tensor(elements), 
+                                            torch.tensor(mu), 
+                                            torch.tensor(lam), 
+                                            torch.tensor(rho),
+                                            cantilever._q0, 
+                                            mesh.dx(),
+                                            hidden_size=training_options['hidden_size'],
+                                            num_hidden_layer=training_options['num_hidden_layer'],
+                                            actuated=training_options['actuated']
+                                            )
+    model_input = f"residual_network"
     
-    model_input = args.parse_args().model
-    if model_input == "residual":
-        model_input = f"residual_network"
-    else:
-        model_input = f"best_trained_model"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"{save_folder}/{model_input}.pth")
     model = torch.load(f"{save_folder}/{model_input}.pth", map_location=device)
@@ -77,6 +115,8 @@ def test_trajectory(
     v_res = v0.clone()
     frame_i = 0
 
+    Path(f"{save_folder}/visualize/{test_data_idx}").mkdir(parents=True, exist_ok=True)
+
     qs_sim = []
     vs_sim = []
     qs_sim.append(q_sim.detach().numpy())
@@ -88,10 +128,17 @@ def test_trajectory(
     res_force_errors = []
     predicted_residual_force_norms = []
     ground_truth_residual_force_norms = []
-    normalize = True
+    normalize = training_options["normalize"]
+    #f_mean, f_std = torch.mean(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
+    f_mean, f_std = torch.zeros(training_set.q_init.shape[0]).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
     sim_t = 0
     res_t = 0
     NN_t = 0
+
+    #cantilever.display_mesh(q_res.detach().numpy(), f"{save_folder}/visualize/{test_data_idx}/0.png")
+
+    print(torch.mean(training_set.fs.view(-1,3), dim=0))
+    print(f_std[:3])
     for frame_i in range(1, end_frame):
         if normalize:
             t0 = time.time()
@@ -108,14 +155,17 @@ def test_trajectory(
             res_force = training_set.denormalize(f=res_force_normalized)[0]
             NN_t += time.time() - t0
         else:
-            res_force = residual_network(
-                torch.cat((q_res - q_init, v_res), dim=0)
-            )
+            t0 = time.time()
+            res_force_normalized = residual_network(
+                torch.cat((q_res, v_res), dim=0)
+            )[0]
+            res_force = training_set.denormalize(f=res_force_normalized, normalization_params=(None, None, None, None, f_mean, f_std))[0]
+            NN_t += time.time() - t0
         res_force_error = torch.norm(res_force - f_optimized[frame_i - 1, :])
-        predicted_residual_force_norms.append(torch.norm(res_force).item())
+        predicted_residual_force_norms.append(torch.norm(res_force.reshape(-1,3), dim=-1).mean().item())
         res_force_errors.append(res_force_error.item())
         ground_truth_residual_force_norms.append(
-            torch.norm(f_optimized[frame_i - 1, :]).item()
+            torch.norm(f_optimized[frame_i - 1, :].reshape(-1,3), dim=-1).mean().item()
         )
         try:
             t0 = time.time()
@@ -133,6 +183,36 @@ def test_trajectory(
         qs_res.append(q_res.detach().numpy())
         vs_sim.append(v_sim.detach().numpy())
         vs_res.append(v_res.detach().numpy())
+
+        #cantilever.display_mesh(q_res.detach().numpy(), f"{save_folder}/visualize/{test_data_idx}/{frame_i}.png")
+
+    # if normalize:
+    #     (
+    #         q_res_normalized,
+    #         v_res_normalized,
+    #     ) = training_set.normalize(q=q_res - q_init, v=v_res)
+    #     res_force_normalized = residual_network(
+    #         torch.cat(
+    #             (q_res_normalized, v_res_normalized),
+    #             dim=0,
+    #         ).expand(1, -1)
+    #     )[0]
+    #     res_force = training_set.denormalize(f=res_force_normalized)[0]
+    # else:
+    #     res_force_normalized = residual_network(
+    #         torch.cat((q_res, v_res), dim=0)
+    #     )[0]
+    #     res_force = training_set.denormalize(f=res_force_normalized, normalization_params=(None, None, None, None, f_mean, f_std))[0]
+    # try:
+    #     q_res, v_res = cantilever.forward(
+    #         q_res, v_res, f_ext=res_force, dt=0.01
+    #     )
+    #     cantilever.display_mesh(q_res.detach().numpy(), f"{save_folder}/visualize/{test_data_idx}/{end_frame}.png")
+
+    # except:
+    #     pass
+
+
     np.save(f"{save_folder}/qs_sim_{test_data_idx}.npy", qs_sim)
     np.save(f"{save_folder}/qs_res_{test_data_idx}.npy", qs_res)
     np.save(f"{save_folder}/vs_sim_{test_data_idx}.npy", vs_sim)
@@ -168,8 +248,9 @@ def test_trajectory(
         vis_1d_folder,
         figsize,
         qs_ground_truth,
-        qs_sim,
+        None,
         qs_res,
+        qs_sim,
         test_data_idx,
         real_frames,
         dt,
@@ -199,11 +280,13 @@ if __name__ == "__main__":
         'mesh_type': 'hex',
         'refinement': 1,
     }
-    cantilever = CantileverEnv3d(42, 'beam', hex_params)
     # save_folder = f"training/sim2simResMLP5"
-    save_folder = "training/test_refactor"
+    save_folder = "training/test_refactor_element_new"
+    cantilever = CantileverEnv3d(42, save_folder, hex_params)
     sim_errors = []
     res_errors = []
+
+
     for test_i in [2,7,11,14,16]:
         print(f"test id {test_i}")
         sim_error, res_error = test_trajectory(
@@ -223,3 +306,7 @@ if __name__ == "__main__":
     print(f"res error {res_errors.mean(-1).flatten().mean() * 1000:.3f}mm +-  {res_errors.mean(-1).flatten().std() * 1000:.3f} mm")
     np.save(f"{save_folder}/sim_errors_{args.parse_args().model}.npy", sim_errors)
     np.save(f"{save_folder}/res_errors_{args.parse_args().model}.npy", res_errors)
+
+    #generate_video_directory(f"{save_folder}/visualize", [2,7,11,14,16], flag="")
+
+

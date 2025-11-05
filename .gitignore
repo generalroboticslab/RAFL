@@ -20,3 +20,4 @@ cantilever_data/*
 .vscode/*
 *.vtk
 python/sim_free/wandb/*
+*.tar.gz

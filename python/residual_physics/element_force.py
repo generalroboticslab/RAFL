@@ -138,11 +138,14 @@ class VarNorm1d(nn.Module):
 
 
 class Unmodelled_Acceleration(nn.Module):
-    def __init__(self, actuated, hidden_dims, nonlinearity, no_bias=True):
+    def __init__(self, actuated, hidden_dims, nonlinearity, no_bias=True, normalize_inputs=True):
         super().__init__()
         self.actuated = actuated
         self.input_dim = 45 if self.actuated else 42
-        self.normalize = torch.nn.BatchNorm1d(self.input_dim, dtype=torch.float64)
+        self.normalize_inputs = normalize_inputs
+
+        if self.normalize_inputs:
+            self.normalize = torch.nn.BatchNorm1d(self.input_dim, dtype=torch.float64)
 
         self.net = _make_mlp(in_dim=self.input_dim, hidden_dims=hidden_dims, out_dim=3,
                              nonlinearity=nonlinearity, no_bias=no_bias)
@@ -173,8 +176,11 @@ class Unmodelled_Acceleration(nn.Module):
         orig_shape = feat.shape[:-1]                            # (...,input_dim)
         feat = feat.reshape(-1,self.input_dim)                  # (N,input_dim)
 
-        norm_feat = self.normalize(feat)
-        a = self.net(norm_feat).view(*orig_shape,3)
+        if self.normalize_inputs:
+            norm_feat = self.normalize(feat)
+            a = self.net(norm_feat).view(*orig_shape,3)
+        else:
+            a = self.net(feat).view(*orig_shape,3)
 
         return a
 
@@ -235,6 +241,7 @@ class ElementResidual(nn.Module):
         self.register_buffer('lam', lam)                    # material Lame parameter lambda
         self.register_buffer('rho', rho)                    # material density
         self._precompute_quadrature(X_e, dx)                # shape functions for FEM            
+        # self._precompute_COM()
 
         self.actuated = actuated
         if self.actuated:
@@ -256,73 +263,122 @@ class ElementResidual(nn.Module):
         self.changing_boundary_indices = changing_boundary_indices
 
     def _precompute_quadrature(self, X_e, dx):
-        
-        E,Ne = self.elements.shape
+        E, Ne = self.elements.shape
 
-        self.register_buffer('q0', torch.tensor(X_e, dtype=torch.float64))  #(3*V)
+        # Store reference positions q0 (flattened 3*V)
+        self.register_buffer('q0', torch.tensor(X_e, dtype=torch.float64))
 
         if Ne == 8:
 
+            print("Hex")
+
             self._mesh_type = 'hex'
 
-            # Define element samples
-            samples = torch.tensor([[0.,0.,0.,0.,1.,1.,1.,1.],[0.,0.,1.,1.,0.,0.,1.,1.],[0.,1.,0.,1.,0.,1.,0.,1.]]).T
-            samples -= 0.5 * torch.ones_like(samples)
+            # ---------------------------------------------------------
+            # Interpret dx: scalar or 3-vector [hx, hy, hz]
+            # ---------------------------------------------------------
+            dx_t = torch.as_tensor(dx, dtype=torch.float64)
+            if dx_t.numel() == 1:
+                dx_t = dx_t.repeat(3)  # isotropic: (dx, dx, dx)
+            assert dx_t.numel() == 3, "dx must be a scalar or length-3 (hx, hy, hz)."
+
+            hx, hy, hz = dx_t
+            inv_dx_x = 1.0 / hx
+            inv_dx_y = 1.0 / hy
+            inv_dx_z = 1.0 / hz
+
+            # ---------------------------------------------------------
+            # Reference Gauss points in [0,1]^3 (independent of size)
+            # Node order: [(0,0,0), (0,0,1), (0,1,0), (0,1,1),
+            #             (1,0,0), (1,0,1), (1,1,0), (1,1,1)]
+            # ---------------------------------------------------------
+            samples = torch.tensor(
+                [
+                    [0., 0., 0.],
+                    [0., 0., 1.],
+                    [0., 1., 0.],
+                    [0., 1., 1.],
+                    [1., 0., 0.],
+                    [1., 0., 1.],
+                    [1., 1., 0.],
+                    [1., 1., 1.],
+                ],
+                dtype=torch.float64,
+            )
+            samples -= 0.5
             samples /= np.sqrt(3)
-            samples += 0.5 * torch.ones_like(samples)
-            samples *= dx 
+            samples += 0.5
+            # scale to physical coordinates with hx, hy, hz
+            samples = samples * dx_t  # broadcast: (8,3) * (3,) -> (8,3)
 
-            N_q = []                    # Shape function N
-            gradN_q = []                # Shape function gradient ∇N
-            element_sample_volume = []  # Element sample volume
-            for e in range(E):
+            # Precompute N and gradN for these samples (same for all hex elements)
+            N_q_e = []
+            gradN_q_e = []
 
-                N_q_e = []
-                gradN_q_e = []
+            for s in range(8):
+                x, y, z = samples[s, 0], samples[s, 1], samples[s, 2]
+                nx, ny, nz = x * inv_dx_x, y * inv_dx_y, z * inv_dx_z
+                cnx, cny, cnz = 1.0 - nx, 1.0 - ny, 1.0 - nz
 
-                # Iterate through element samples
-                # Element Node order: [(0,0,0), (0,0,1), (0,1,0), (0,1,1), (1,0,0), (1,0,1), (1,1,0), (1,1,1)]
-                for s in range(8):
-                    inv_dx = 1 / dx
-                    x, y, z = samples[s,0], samples[s,1], samples[s,2]
-                    nx, ny, nz = x * inv_dx, y * inv_dx, z * inv_dx
-                    cnx, cny, cnz = 1 - nx, 1 - ny, 1 - nz
+                # Shape functions N at sample s
+                N_q_e.append(
+                    [
+                        cnx * cny * cnz,   # N000
+                        cnx * cny * nz,    # N001
+                        cnx * ny * cnz,    # N010
+                        cnx * ny * nz,     # N011
+                        nx * cny * cnz,    # N100
+                        nx * cny * nz,     # N101
+                        nx * ny * cnz,     # N110
+                        nx * ny * nz,      # N111
+                    ]
+                )
 
-                    # Shape function N for sample s
-                    N_q_e.append(
-                                [
-                                        cnx*cny*cnz,            
-                                        cnx*cny*nz,             
-                                        cnx*ny*cnz,             
-                                        cnx*ny*nz,              
-                                        nx*cny*cnz,             
-                                        nx*cny*nz,              
-                                        nx*ny*cnz,              
-                                        nx*ny*nz,               
-                                    ]
-                                )
-                    # Shape function gradient ∇N for sample s
-                    gradN_q_e.append(
-                                [[-inv_dx * cny * cnz, cnx * -inv_dx * cnz, cnx * cny * -inv_dx],   
-                                [-inv_dx * cny * nz, cnx * -inv_dx * nz, cnx * cny * inv_dx],       
-                                [-inv_dx * ny * cnz, cnx * inv_dx * cnz, cnx * ny * -inv_dx],       
-                                [-inv_dx * ny * nz, cnx * inv_dx * nz, cnx * ny * inv_dx],          
-                                [inv_dx * cny * cnz, nx * -inv_dx * cnz, nx * cny * -inv_dx],       
-                                [inv_dx * cny * nz, nx * -inv_dx * nz, nx * cny * inv_dx],          
-                                [inv_dx * ny * cnz, nx * inv_dx * cnz, nx * ny * -inv_dx],          
-                                [inv_dx * ny * nz, nx * inv_dx * nz, nx * ny * inv_dx]]             
-                                )
+                # Gradients in physical coordinates:
+                # d/dx = (d/dnx) * (1/hx), etc.
+                gradN_q_e.append(
+                    [
+                        # N000
+                        [-inv_dx_x * cny * cnz,  cnx * -inv_dx_y * cnz,  cnx * cny * -inv_dx_z],
+                        # N001
+                        [-inv_dx_x * cny * nz,   cnx * -inv_dx_y * nz,   cnx * cny *  inv_dx_z],
+                        # N010
+                        [-inv_dx_x * ny * cnz,   cnx *  inv_dx_y * cnz,  cnx * ny  * -inv_dx_z],
+                        # N011
+                        [-inv_dx_x * ny * nz,    cnx *  inv_dx_y * nz,   cnx * ny  *  inv_dx_z],
+                        # N100
+                        [ inv_dx_x * cny * cnz,  nx  * -inv_dx_y * cnz,  nx  * cny * -inv_dx_z],
+                        # N101
+                        [ inv_dx_x * cny * nz,   nx  * -inv_dx_y * nz,   nx  * cny *  inv_dx_z],
+                        # N110
+                        [ inv_dx_x * ny * cnz,   nx  *  inv_dx_y * cnz,  nx  * ny  * -inv_dx_z],
+                        # N111
+                        [ inv_dx_x * ny * nz,    nx  *  inv_dx_y * nz,   nx  * ny  *  inv_dx_z],
+                    ]
+                )
 
-                N_q.append(torch.tensor(N_q_e, dtype=torch.float64))
-                gradN_q.append(torch.tensor(gradN_q_e, dtype=torch.float64))
-                element_sample_volume.append(torch.tensor(8*[dx**3 / 8], dtype=torch.float64).reshape(8,1))
+            N_q_e = torch.tensor(N_q_e, dtype=torch.float64)          # (Q=8, Ne=8)
+            gradN_q_e = torch.tensor(gradN_q_e, dtype=torch.float64)  # (Q=8, Ne=8, 3)
 
-            self.register_buffer('N_q', torch.stack(N_q, dim=0))                                        #(E,Q,Ne)
-            self.register_buffer('gradN_q', torch.stack(gradN_q, dim=0))                                #(E,Q,Ne,3)
-            self.register_buffer('element_sample_volume', torch.stack(element_sample_volume, dim=0))    #(E,Q,1)
+            # Element sample volume (same for all elements if dx is global)
+            vol_e = hx * hy * hz
+            sample_vol = vol_e / 8.0
+            element_sample_volume_e = torch.full((8, 1), sample_vol, dtype=torch.float64)
+
+            # Replicate for all elements
+            N_q = [N_q_e for _ in range(E)]
+            gradN_q = [gradN_q_e for _ in range(E)]
+            element_sample_volume = [element_sample_volume_e for _ in range(E)]
+
+            self.register_buffer('N_q', torch.stack(N_q, dim=0))                     # (E, Q=8, Ne=8)
+            self.register_buffer('gradN_q', torch.stack(gradN_q, dim=0))             # (E, Q=8, Ne=8, 3)
+            self.register_buffer('element_sample_volume',
+                                torch.stack(element_sample_volume, dim=0))          # (E, Q=8, 1)
 
         elif Ne == 4:
-            
+
+            print("Tet")
+
             self._mesh_type = 'tet'
 
             N_q = []                    # Shape function N
@@ -330,27 +386,58 @@ class ElementResidual(nn.Module):
             element_sample_volume = []  # Element sample volume
             for e in range(E):
 
-                N_q.append(torch.tensor(4 * [0.25], dtype=torch.float64))                           #(Ne)
+                N_q.append(torch.tensor(4 * [0.25], dtype=torch.float64))  # (Ne)
 
-                X0 = X_e[3*self.elements[e][0]:3*self.elements[e][0]+3]
-                X1 = X_e[3*self.elements[e][1]:3*self.elements[e][1]+3]
-                X2 = X_e[3*self.elements[e][2]:3*self.elements[e][2]+3]
-                X3 = X_e[3*self.elements[e][3]:3*self.elements[e][3]+3]
+                X0 = X_e[3 * self.elements[e][0]:3 * self.elements[e][0] + 3]
+                X1 = X_e[3 * self.elements[e][1]:3 * self.elements[e][1] + 3]
+                X2 = X_e[3 * self.elements[e][2]:3 * self.elements[e][2] + 3]
+                X3 = X_e[3 * self.elements[e][3]:3 * self.elements[e][3] + 3]
 
-                J = torch.stack([X1 - X0, X2 - X0, X3 - X0], dim=1)                                 # (3,3)
-                B = torch.linalg.inv(J)                                                             # (3,3)
-                gradN_q.append(torch.stack([-B[:,0] - B[:,1] - B[:,2], B[:,0], B[:,1], B[:,2]]))    # (Ne,3)
+                X0 = torch.as_tensor(X0, dtype=torch.float64)
+                X1 = torch.as_tensor(X1, dtype=torch.float64)
+                X2 = torch.as_tensor(X2, dtype=torch.float64)
+                X3 = torch.as_tensor(X3, dtype=torch.float64)
 
-                vol_e = torch.abs(torch.det(J)) / 6.0                                               # scalar
-                element_sample_volume.append(vol_e.reshape(1))                                      # (1)
+                J = torch.stack([X1 - X0, X2 - X0, X3 - X0], dim=1)              # (3,3)
+                B = torch.linalg.inv(J)                                          # (3,3)
+                gradN_q.append(torch.stack(
+                    [-B[:, 0] - B[:, 1] - B[:, 2], B[:, 0], B[:, 1], B[:, 2]]
+                ))                                                                # (Ne,3)
 
-            self.register_buffer('N_q', torch.stack(N_q, dim=0).unsqueeze(1))                                       #(E,Q,Ne)
-            self.register_buffer('gradN_q', torch.stack(gradN_q, dim=0).unsqueeze(1))                               #(E,Q,Ne,3)
-            self.register_buffer('element_sample_volume', torch.stack(element_sample_volume, dim=0).unsqueeze(1))   #(E,Q,1)
+                vol_e = torch.abs(torch.det(J)) / 6.0                            # scalar
+                element_sample_volume.append(vol_e.reshape(1))                   # (1)
+
+            self.register_buffer('N_q', torch.stack(N_q, dim=0).unsqueeze(1))                 # (E, Q=1, Ne)
+            self.register_buffer('gradN_q', torch.stack(gradN_q, dim=0).unsqueeze(1))         # (E, Q=1, Ne,3)
+            self.register_buffer('element_sample_volume',
+                                torch.stack(element_sample_volume, dim=0).unsqueeze(1))      # (E, Q=1, 1)
 
         else:
             # Current implementation only supports hex and tet mesh
             exit()
+
+    def _precompute_COM(self,):
+
+        E, Ne = self.elements.shape
+        q0 = self.q0.reshape(-1,3)
+        q0_nodes = q0[self.elements, :]                                         # (E,Ne,3)
+        q0_e = torch.einsum('eni,eqn->eqi', q0_nodes, self.N_q)                 # (E,Q,3)
+
+        rho = self.rho.reshape(E,1,1)                                           # (E,1,1)
+        volume = self.element_sample_volume                                     # (E,Q,1)
+        m = rho * volume                                                        # (E,Q,1)
+        q_cm = (m * q0_e).sum(dim=[0,1]) / m.sum(dim=[0,1])                     # (3)
+
+        q0_rel = q0_e - q_cm.reshape(1,1,3)                                     # (E,Q,3)
+
+        max_q0_rel = torch.abs(q0_rel.reshape(-1,3)).max(dim=0, keepdim=True)[0] # (1,3)
+
+        norm_q0_rel = q0_rel / max_q0_rel.reshape(1,1,3)
+
+        self.register_buffer('q0_rel', q0_rel)
+        self.register_buffer('norm_q0_rel', norm_q0_rel)
+
+
 
     def to_elements(self, q):
         # q: (B,V,3) -> (B,E,Ne,3)
@@ -442,15 +529,15 @@ class ElementResidual(nn.Module):
 
         # Interpolate element nodes to samples
         # *_e: (B,E,Ne,*), N_q: (E,Q,Ne) -> q_e: (B,E,Q,*)
-        q_e = torch.einsum('beni,eqn->beqi', q_e, self.N_q.to(q_e.dtype))        # (B,E,Q,3)
-        v_e = torch.einsum('beni,eqn->beqi', v_e, self.N_q.to(v_e.dtype))        # (B,E,Q,3)
+        q_e = torch.einsum('beni,eqn->beqi', q_e, self.N_q.to(q_e.dtype))                   # (B,E,Q,3)
+        v_e = torch.einsum('beni,eqn->beqi', v_e - v_base, self.N_q.to(v_e.dtype))          # (B,E,Q,3)
 
         # Center of Mass using element densities
         M = m.sum(dim=[1,2]).reshape(B,1,1,1)                                               # (B,1,1,1)
         q_sum = (m * q_e).sum(dim=[1,2]).reshape(B,1,1,3)                                   # (B,1,1,3)
         v_sum = (m * v_e).sum(dim=[1,2]).reshape(B,1,1,3)                                   # (B,1,1,3)
         q_cm = q_sum / M - q_offset                                                         # (B,1,1,3)
-        v_cm = v_sum / M - v_base                                                           # (B,1,1,3)
+        v_cm = v_sum / M                                                                    # (B,1,1,3)
 
         # Relative position and velocity wrt Center of Mass
         q_rel = q_e - q_cm                                                                  # (B,E,Q,3)
@@ -594,6 +681,8 @@ class ElementResidual(nn.Module):
         v_rel_mag = v_rel.norm(dim=-1, keepdim=True)                                # (B,E,Q,1)
         v_cm_mag  = v_cm.norm(dim=-1, keepdim=True)                                 # (B,E,Q,1)
 
+        # orig_norm_q_rel = self.norm_q0_rel.reshape(1,E,Q,3).expand(B,E,Q,3)
+
         # 13-dim features (co-rotated frame):
         feat_deformation = torch.cat([
                                         I1_F,                                       # principle stretches (3)
@@ -618,6 +707,7 @@ class ElementResidual(nn.Module):
         # 11-dim features (co-rotated frame): 
         feat_rigidMotion = torch.cat([
                                     q_rel_c,                                        # relative position wrt COM (3)
+                                    # orig_norm_q_rel,
                                     v_rel_c,                                        # relative velocity wrt COM (3)
                                     v_cm_c,                                         # COM velocity (3)
                                     v_rel_mag,                                      # relative speed (1)

@@ -3,6 +3,7 @@ import cv2
 from pathlib import Path
 import shutil
 from tqdm import tqdm
+import re
 
 def generate_video_directory(fig_path, path_nums, flag="", delete_after=False):
 
@@ -16,14 +17,14 @@ def generate_video_directory(fig_path, path_nums, flag="", delete_after=False):
         generate_video(fig_path, str(i), os.path.join(vid_folder, f'{i}.mp4'), delete_after=delete_after)
 
 
-def generate_video(fig_path, path_num, dst_path, fps=20, delete_after=False):
+def generate_video(fig_path, path_num, dst_path, fps=20, delete_after=False, num_frames=None):
 
     fig_path = os.path.join(fig_path, path_num)
 
     images = [img for img in os.listdir(fig_path)
                 if img.endswith(".png") or img.endswith(".jpg")]
     
-    images.sort(key = lambda x: int(x[:-4]))
+    images.sort(key = lambda x: int(re.findall(r'\d+', x[:-4])[0]))
 
     frame = cv2.imread(os.path.join(fig_path, images[0]))
 
@@ -32,7 +33,17 @@ def generate_video(fig_path, path_num, dst_path, fps=20, delete_after=False):
     video = cv2.VideoWriter(dst_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height)) 
 
     # Appending the images to the video one by one
-    for image in images: 
+
+    if num_frames is not None:
+
+        video_images = images[:num_frames]
+
+        print(f"Print until: {video_images[-1]}")
+
+    else:
+        video_images = images
+
+    for image in video_images: 
         video.write(cv2.imread(os.path.join(fig_path, image))) 
     
     # Deallocating memories taken for window creation

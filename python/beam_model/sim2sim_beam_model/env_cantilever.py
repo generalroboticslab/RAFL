@@ -73,9 +73,11 @@ class CantileverEnv3d (EnvBase):
 
         ### Boundary Conditions
         self.force_nodes = []
+        self.boundary_indices = []
         for i in range(vert_num):
             vx, vy, vz = verts[i]
             if abs(vx - min_corner[0]) < 1e-3:
+                self.boundary_indices.append(3*i)
                 deformable.SetDirichletBoundaryCondition(3 * i, vx)
                 deformable.SetDirichletBoundaryCondition(3 * i + 1, vy)
                 deformable.SetDirichletBoundaryCondition(3 * i + 2, vz)
@@ -130,6 +132,9 @@ class CantileverEnv3d (EnvBase):
         self._q0 = self.q0.clone().detach().numpy()
         self._v0 = self.v0.clone().detach().numpy()
         
+
+    def is_dirichlet_dof(self, i):
+        return i in self.boundary_indices
 
     def forward (self, q, v, act=None, f_ext=None, dt=0.01):
         if f_ext is None:

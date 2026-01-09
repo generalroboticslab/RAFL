@@ -13,9 +13,10 @@ from _utils import CantileverDataset
 from _visualization import plot_trajectory, plot_forces_norm
 from env_cantilever import CantileverEnv3d
 from residual_physics.network import ResMLPResidual2, MLPResidual
-from residual_physics.element_force import ElementResidual
+from residual_physics.element_force_update import ElementResidual as UpdatedElementResidual
+from residual_physics.element_force import ElementResidual as OldElementResidual
 from py_diff_pd.common.common import ndarray
-
+from py_diff_pd.common.hex_mesh import get_boundary_face
 
 def test_trajectory(
     cantilever:CantileverEnv3d, save_folder, test_data_idx, transformed_markers, start_frame=0, end_frame=150, cantilever_sim=None,
@@ -65,18 +66,61 @@ def test_trajectory(
             lam.append(la)
             rho.append(cantilever._deformable.density())
         
+        surface_faces = get_boundary_face(mesh)
         elements = ndarray(elements)
         mu = ndarray(mu)
         lam = ndarray(lam)
         rho = ndarray(rho)
 
-        residual_network = ElementResidual(cantilever._dofs, 
+        residual_network = UpdatedElementResidual(cantilever._dofs, 
+                                            torch.tensor(elements), 
+                                            torch.tensor(surface_faces), 
+                                            torch.tensor(mu), 
+                                            torch.tensor(lam), 
+                                            torch.tensor(rho),
+                                            cantilever._q0, 
+                                            0.01,
+                                            hidden_size=training_options['hidden_size'],
+                                            num_hidden_layer=training_options['num_hidden_layer'],
+                                            actuated=training_options['actuated']
+                                            )
+    elif training_options['model'] == 'element_old':
+        g = training_options['state_force_parameters']
+        poissons_ratio = 0.45
+        youngs_modulus = 215856
+
+        la = (
+                cantilever._youngs_modulus
+                * cantilever._poissons_ratio
+                / ((1 + cantilever._poissons_ratio) * (1 - 2 * cantilever._poissons_ratio))
+            )
+        m = cantilever._youngs_modulus / (2 * (1 + cantilever._poissons_ratio))
+
+        mesh = cantilever._deformable.mesh()
+
+        elements = []
+        mu = []
+        lam = []
+        rho = []
+        num_elements = mesh.NumOfElements()
+        for e in range(num_elements):
+            elements.append(mesh.py_element(e))
+            mu.append(m)
+            lam.append(la)
+            rho.append(cantilever._deformable.density())
+        
+        elements = ndarray(elements)
+        mu = ndarray(mu)
+        lam = ndarray(lam)
+        rho = ndarray(rho)
+
+        residual_network = OldElementResidual(cantilever._dofs, 
                                             torch.tensor(elements), 
                                             torch.tensor(mu), 
                                             torch.tensor(lam), 
                                             torch.tensor(rho),
                                             cantilever._q0, 
-                                            mesh.dx(),
+                                            0.01,
                                             hidden_size=training_options['hidden_size'],
                                             num_hidden_layer=training_options['num_hidden_layer'],
                                             actuated=training_options['actuated']
@@ -143,27 +187,38 @@ def test_trajectory(
     #print(residual_network.unmodelled_nn(torch.zeros(13, dtype=torch.float64), torch.zeros(14, dtype=torch.float64), torch.zeros(4, dtype=torch.float64), torch.zeros(11, dtype=torch.float64), torch.zeros(3, dtype=torch.float64)))
     for frame_i in range(1, end_frame):
         if normalize:
-            ti = time.time()
-            (
-                q_res_normalized,
-                v_res_normalized,
-            ) = training_set.normalize(q=q_res - q_init, v=v_res)
-            res_force_normalized = residual_network(
-                torch.cat(
-                    (q_res_normalized, v_res_normalized),
-                    dim=0,
-                ).expand(1, -1)
-            )[0]
-            res_force = training_set.denormalize(f=res_force_normalized)[0]
-            ti_end = time.time()
-            time_network += ti_end - ti
-            time_res += ti_end - ti
+            
+            if 'element' in training_options['model']:
+                ti = time.time()
+                res_force_normalized = residual_network(
+                    torch.cat((q_res, v_res), dim=0)
+                )[0]
+                res_force = training_set.denormalize(f=res_force_normalized, normalization_params=(None, None, None, None, f_mean, f_std))[0]
+                ti_end = time.time()
+                time_network += ti_end - ti
+                time_res += ti_end - ti
+            else:
+                ti = time.time()
+                (
+                    q_res_normalized,
+                    v_res_normalized,
+                ) = training_set.normalize(q=q_res - q_init, v=v_res)
+                res_force_normalized = residual_network(
+                    torch.cat(
+                        (q_res_normalized, v_res_normalized),
+                        dim=0,
+                    ).expand(1, -1)
+                )[0]
+                res_force = training_set.denormalize(f=res_force_normalized)[0]
+                ti_end = time.time()
+                time_network += ti_end - ti
+                time_res += ti_end - ti
         else:
             ti = time.time()
             res_force_normalized = residual_network(
                 torch.cat((q_res, v_res), dim=0)
             )[0]
-            res_force = training_set.denormalize(f=res_force_normalized, normalization_params=(None, None, None, None, f_mean, f_std))[0]
+            res_force = res_force_normalized
             ti_end = time.time()
             time_network += ti_end - ti
             time_res += ti_end - ti
@@ -316,7 +371,7 @@ if __name__ == "__main__":
 
     cantilever.interpolate_markers_3d(q_.detach().numpy(), steady_state_transformed)
 
-    save_folder = f"training/test_refactor_element_new"
+    save_folder = f"training/test_refactor_element_zero_7"
     sim_errors = []
     res_errors = []
     origin_errors = []

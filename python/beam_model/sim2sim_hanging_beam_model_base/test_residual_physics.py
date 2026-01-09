@@ -270,7 +270,7 @@ def test_trajectory(
             )[0]
             res_force = training_set.denormalize(f=res_force_normalized, normalization_params=(None, None, None, None, None, None, f_mean, f_std))[0]
 
-        #res_force = f_optimized[frame_i - 1, :].clone()
+        res_force = f_optimized[frame_i - 1, :].clone()
         res_force[boundary_indices] = 0
         res_force_error = torch.norm(res_force - f_optimized[frame_i - 1, :])
         res_force_errors.append(res_force_error.item())

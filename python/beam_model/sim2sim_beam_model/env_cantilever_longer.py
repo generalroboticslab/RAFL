@@ -18,6 +18,7 @@ class LongerCantileverEnv3d (EnvBase):
     def __init__(self, seed, folder, options):
         EnvBase.__init__(self, folder)
 
+        self.folder = folder
         np.random.seed(seed)
         create_folder(folder, exist_ok=True)
 
@@ -146,6 +147,7 @@ class LongerCantileverEnv3d (EnvBase):
         Allow to get images of the simulation
         """
         options = {
+            "parent_dir": self.folder,
             "file_name": file_name,
             "light_map": "uffizi-large.exr",
             "sample": 8,
@@ -156,7 +158,7 @@ class LongerCantileverEnv3d (EnvBase):
         renderer = PbrtRenderer(options)
         transforms = [("s", 2.4), ("t", [0.0, -0.2, 0.25])]
 
-        tmp_bin_file_name = '.tmp.bin'
+        tmp_bin_file_name = f'{self.folder}/.tmp.bin'
         self._deformable.PySaveToMeshFile(ndarray(q), tmp_bin_file_name)
 
         mesh = HexMesh3d()

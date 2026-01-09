@@ -10,7 +10,7 @@
 template<int vertex_dim, int element_dim>
 Deformable<vertex_dim, element_dim>::Deformable()
     : mesh_(), density_(0), element_volume_(0), material_(nullptr), dofs_(0), pd_solver_ready_(false), act_dofs_(0),
-    frictional_boundary_(nullptr) {}
+    frictional_boundary_(nullptr), meta_material_(false) {}
 
 template<int vertex_dim, int element_dim>
 void Deformable<vertex_dim, element_dim>::Initialize(const std::string& binary_file_name, const real density,
@@ -90,6 +90,36 @@ void Deformable<vertex_dim, element_dim>::Backward(const std::string& method, co
         PrintError("Unsupported backward method: " + method);
 }
 
+// Meta Material Functions
+template<int vertex_dim, int element_dim>
+void Deformable<vertex_dim, element_dim>::Forward(const std::string& method, const VectorXr& q, const VectorXr& v,
+    const VectorXr& a, const VectorXr& f_ext, const VectorXr& p,
+    const real dt, const std::map<std::string, real>& options, VectorXr& q_next, VectorXr& v_next,
+    std::vector<int>& active_contact_idx) const {
+    if (method == "semi_implicit") PrintError("Unsupported forward method: " + method);
+    else if (BeginsWith(method, "pd")) ForwardProjectiveDynamics(method, q, v, a, f_ext, p, dt, options, q_next, v_next, active_contact_idx);
+    else if (BeginsWith(method, "newton")) PrintError("Unsupported forward method: " + method);
+    else PrintError("Unsupported forward method: " + method);
+}
+
+template<int vertex_dim, int element_dim>
+void Deformable<vertex_dim, element_dim>::Backward(const std::string& method, const VectorXr& q, const VectorXr& v, const VectorXr& a,
+    const VectorXr& f_ext, const VectorXr& p, const real dt, const VectorXr& q_next, const VectorXr& v_next,
+    const std::vector<int>& active_contact_idx, const VectorXr& dl_dq_next,
+    const VectorXr& dl_dv_next, const std::map<std::string, real>& options,
+    VectorXr& dl_dq, VectorXr& dl_dv, VectorXr& dl_da, VectorXr& dl_df_ext, VectorXr& dl_dp,
+    VectorXr& dl_dmat_w, VectorXr& dl_dact_w, VectorXr& dl_dstate_p) const {
+    if (method == "semi_implicit")
+        PrintError("Unsupported forward method: " + method);
+    else if (BeginsWith(method, "pd"))
+        BackwardProjectiveDynamics(method, q, v, a, f_ext, p, dt, q_next, v_next, active_contact_idx, dl_dq_next, dl_dv_next, options,
+            dl_dq, dl_dv, dl_da, dl_df_ext, dl_dp, dl_dmat_w, dl_dact_w, dl_dstate_p);
+    else if (BeginsWith(method, "newton"))
+        PrintError("Unsupported forward method: " + method);
+    else
+        PrintError("Unsupported backward method: " + method);
+}
+
 template<int vertex_dim, int element_dim>
 void Deformable<vertex_dim, element_dim>::SaveToMeshFile(const VectorXr& q, const std::string& obj_file_name) const {
     CheckError(static_cast<int>(q.size()) == dofs_, "Inconsistent q size. " + std::to_string(q.size())
@@ -127,6 +157,40 @@ void Deformable<vertex_dim, element_dim>::PyBackward(const std::string& method, 
     dl_dv = ToStdVector(dl_dv_eig);
     dl_da = ToStdVector(dl_da_eig);
     dl_df_ext = ToStdVector(dl_df_ext_eig);
+    dl_dmat_w = ToStdVector(dl_dmat_w_eig);
+    dl_dact_w = ToStdVector(dl_dact_w_eig);
+    dl_dstate_p = ToStdVector(dl_dstate_p_eig);
+}
+
+// Meta Material Functions
+template<int vertex_dim, int element_dim>
+void Deformable<vertex_dim, element_dim>::PyForward(const std::string& method, const std::vector<real>& q, const std::vector<real>& v,
+    const std::vector<real>& a, const std::vector<real>& f_ext, const std::vector<real>& p, const real dt, const std::map<std::string, real>& options,
+    std::vector<real>& q_next, std::vector<real>& v_next, std::vector<int>& active_contact_idx) const {
+    VectorXr q_next_eig, v_next_eig;
+    Forward(method, ToEigenVector(q), ToEigenVector(v), ToEigenVector(a), ToEigenVector(f_ext), ToEigenVector(p), dt, options, q_next_eig, v_next_eig,
+        active_contact_idx);
+    q_next = ToStdVector(q_next_eig);
+    v_next = ToStdVector(v_next_eig);
+}
+
+template<int vertex_dim, int element_dim>
+void Deformable<vertex_dim, element_dim>::PyBackward(const std::string& method, const std::vector<real>& q, const std::vector<real>& v,
+    const std::vector<real>& a, const std::vector<real>& f_ext, const std::vector<real>& p, const real dt, const std::vector<real>& q_next,
+    const std::vector<real>& v_next, const std::vector<int>& active_contact_idx,
+    const std::vector<real>& dl_dq_next, const std::vector<real>& dl_dv_next,
+    const std::map<std::string, real>& options,
+    std::vector<real>& dl_dq, std::vector<real>& dl_dv, std::vector<real>& dl_da, std::vector<real>& dl_df_ext, std::vector<real>& dl_dp,
+    std::vector<real>& dl_dmat_w, std::vector<real>& dl_dact_w, std::vector<real>& dl_dstate_p) const {
+    VectorXr dl_dq_eig, dl_dv_eig, dl_da_eig, dl_df_ext_eig, dl_dp_eig, dl_dmat_w_eig, dl_dact_w_eig, dl_dstate_p_eig;
+    Backward(method, ToEigenVector(q), ToEigenVector(v), ToEigenVector(a), ToEigenVector(f_ext), ToEigenVector(p), dt, ToEigenVector(q_next),
+        ToEigenVector(v_next), active_contact_idx, ToEigenVector(dl_dq_next), ToEigenVector(dl_dv_next), options,
+        dl_dq_eig, dl_dv_eig, dl_da_eig, dl_df_ext_eig, dl_dp_eig, dl_dmat_w_eig, dl_dact_w_eig, dl_dstate_p_eig);
+    dl_dq = ToStdVector(dl_dq_eig);
+    dl_dv = ToStdVector(dl_dv_eig);
+    dl_da = ToStdVector(dl_da_eig);
+    dl_df_ext = ToStdVector(dl_df_ext_eig);
+    dl_dp = ToStdVector(dl_dp_eig);
     dl_dmat_w = ToStdVector(dl_dmat_w_eig);
     dl_dact_w = ToStdVector(dl_dact_w_eig);
     dl_dstate_p = ToStdVector(dl_dstate_p_eig);

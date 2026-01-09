@@ -56,6 +56,126 @@ const Eigen::Matrix<real, dim * dim, dim * dim> PdElementEnergy<dim>::StressTens
     return stiffness_ * (I - ProjectToManifoldDifferential(F_auxiliary, projection));
 }
 
+
+// Meta Material
+
+template<int dim>
+void PdElementEnergy<dim>::Initialize(const real stiffness_1, const real stiffness_2) { stiffness_1_ = stiffness_1; stiffness_2_ = stiffness_2;}
+
+template<int dim>
+const real PdElementEnergy<dim>::stiffness(const real& p_e) const { 
+    if (p_e >= 0.5){ 
+        return stiffness_2_; 
+    } 
+    else{ 
+        return stiffness_1_; 
+    }
+}
+
+
+template<int dim>
+const real PdElementEnergy<dim>::EnergyDensity(const Eigen::Matrix<real, dim, dim>& F, const real& p_e) const {
+
+    if (p_e >= 0.5){
+        return stiffness_2_ * 0.5 * (F - ProjectToManifold(F)).squaredNorm();
+    }
+    else{
+        return stiffness_1_ * 0.5 * (F - ProjectToManifold(F)).squaredNorm();
+    }
+}
+
+template<int dim>
+const Eigen::Matrix<real, dim, dim> PdElementEnergy<dim>::StressTensor(const Eigen::Matrix<real, dim, dim>& F, const real& p_e) const {
+    
+    if (p_e >= 0.5){
+        return stiffness_2_ * (F - ProjectToManifold(F));
+    }
+    else{
+        return stiffness_1_ * (F - ProjectToManifold(F));
+    }
+}
+
+template<int dim>
+const Eigen::Matrix<real, dim, dim> PdElementEnergy<dim>::StressTensorDifferential(const Eigen::Matrix<real, dim, dim>& F,
+    const Eigen::Matrix<real, dim, dim>& dF, const real& p_e) const {
+
+    if (p_e >= 0.5){
+        return stiffness_2_ * (dF - ProjectToManifoldDifferential(F, dF));
+    }
+    else{
+        return stiffness_1_ * (dF - ProjectToManifoldDifferential(F, dF));
+    }
+}
+
+template<int dim>
+const Eigen::Matrix<real, dim * dim, dim * dim> PdElementEnergy<dim>::StressTensorDifferential(
+    const Eigen::Matrix<real, dim, dim>& F, const real& p_e) const {
+    Eigen::Matrix<real, dim * dim, dim * dim> I;
+    I.setZero();
+    for (int i = 0; i < dim * dim; ++i) I(i, i) = 1;
+
+    if (p_e >= 0.5){
+        return stiffness_2_ * (I - ProjectToManifoldDifferential(F));
+    }
+    else{
+        return stiffness_1_ * (I - ProjectToManifoldDifferential(F));
+    }
+}
+
+template<int dim>
+const real PdElementEnergy<dim>::EnergyDensity(const DeformationGradientAuxiliaryData<dim>& F_auxiliary,
+    const Eigen::Matrix<real, dim, dim>& projection, const real& p_e) const {
+
+    if (p_e >= 0.5){
+        return stiffness_2_ * 0.5 * (F_auxiliary.F() - projection).squaredNorm();
+    }
+    else{
+        return stiffness_1_ * 0.5 * (F_auxiliary.F() - projection).squaredNorm();
+    }
+}
+
+template<int dim>
+const Eigen::Matrix<real, dim, dim> PdElementEnergy<dim>::StressTensor(const DeformationGradientAuxiliaryData<dim>& F_auxiliary,
+    const Eigen::Matrix<real, dim, dim>& projection, const real& p_e) const {
+
+    if (p_e >= 0.5){
+        return stiffness_2_ * (F_auxiliary.F() - projection);
+    }
+    else{
+        return stiffness_1_ * (F_auxiliary.F() - projection);
+    }
+}
+
+template<int dim>
+const Eigen::Matrix<real, dim, dim> PdElementEnergy<dim>::StressTensorDifferential(
+    const DeformationGradientAuxiliaryData<dim>& F_auxiliary,
+    const Eigen::Matrix<real, dim, dim>& projection, const Eigen::Matrix<real, dim, dim>& dF, const real& p_e) const {
+
+    if (p_e >= 0.5){
+        return stiffness_2_ * (dF - ProjectToManifoldDifferential(F_auxiliary, projection, dF));
+    }
+    else{
+        return stiffness_1_ * (dF - ProjectToManifoldDifferential(F_auxiliary, projection, dF));
+    }
+}
+
+template<int dim>
+const Eigen::Matrix<real, dim * dim, dim * dim> PdElementEnergy<dim>::StressTensorDifferential(
+    const DeformationGradientAuxiliaryData<dim>& F_auxiliary, const Eigen::Matrix<real, dim, dim>& projection, const real& p_e) const {
+    Eigen::Matrix<real, dim * dim, dim * dim> I;
+    I.setZero();
+    for (int i = 0; i < dim * dim; ++i) I(i, i) = 1;
+    
+    if (p_e >= 0.5){
+        return stiffness_2_ * (I - ProjectToManifoldDifferential(F_auxiliary, projection));
+    }
+    else{
+        return stiffness_1_ * (I - ProjectToManifoldDifferential(F_auxiliary, projection));
+    }
+}
+
+
+
 template<int dim>
 const Eigen::Matrix<real, dim * dim, dim * dim> PdElementEnergy<dim>::ProjectToManifoldDifferential(
     const Eigen::Matrix<real, dim, dim>& F) const {

@@ -7,6 +7,7 @@ import torch
 
 from env_cantilever import CantileverEnv3d
 from argparse import ArgumentParser
+from video_generation import *
 
 args = ArgumentParser()
 args.add_argument("-t", dest="save_folder", required=False)
@@ -32,12 +33,13 @@ if __name__ == '__main__':
     q = torch.from_numpy(cantilever._q0)
     v = torch.zeros_like(q)
 
+    Path(f"{save_folder}/visualizations").mkdir(parents=True, exist_ok=True)
     for id in range(len(weights)):
         if save_folder == 'data_real':
             for j in range(prepare):
                 weight = weights[id] * 9.80709
                 res_force = torch.zeros(q.shape, dtype=torch.float64)
-                res_force[-49*3+2::3] = - weight / 16
+                res_force[-16*3+2::3] = - weight / 16
                 q, v = cantilever.forward(q, v, f_ext=res_force, dt=0.01)
         elif save_folder == 'data_sim':
             q = torch.from_numpy(np.load(f'data_real/trajectory{id}.npy', allow_pickle=True)[()]['q'][0])
@@ -47,13 +49,16 @@ if __name__ == '__main__':
 
         q_trajectory = [q.detach().numpy()]
         v_trajectory = [v.detach().numpy()]
+        cantilever.display_mesh(q.detach(), f"{save_folder}/visualizations/{id}/0.png")
         for k in range(150):
             q, v = cantilever.forward(q, v, f_ext=torch.zeros_like(q), dt=0.01)
             q_trajectory.append(q.detach().numpy())
             v_trajectory.append(v.detach().numpy())
+            cantilever.display_mesh(q.detach(), f"{save_folder}/visualizations/{id}/{k+1}.png")
         data = {"q" : np.stack(q_trajectory), "v" : np.stack(v_trajectory)}
         np.save(f'{save_folder}/trajectory{id}.npy', data)
         print("Finish trajectory", id)
+    generate_video_directory(f"{save_folder}/visualizations", list(range(len(weights))), flag="")
 
 
 

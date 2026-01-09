@@ -18,6 +18,7 @@ class ShorterCantileverEnv3d (EnvBase):
     def __init__(self, seed, folder, options):
         EnvBase.__init__(self, folder)
 
+        self.folder = folder
         np.random.seed(seed)
         create_folder(folder, exist_ok=True)
 
@@ -47,8 +48,8 @@ class ShorterCantileverEnv3d (EnvBase):
         ### Mesh Parameters
         # Cantilever is 0.05m long, 0.03m wide, and 0.03m tall
         dx = 0.01 / refinement
-        cell_nums = (round(0.05 / dx), round(0.03 / dx), round(0.03 / dx))
-        assert cell_nums[0] * dx == 0.05 and cell_nums[1] * dx == 0.03, "Refinement does not properly divide the cantilever dimensions!" 
+        cell_nums = (round(0.08 / dx), round(0.03 / dx), round(0.03 / dx))
+        assert cell_nums[0] * dx == 0.08 and cell_nums[1] * dx == 0.03, "Refinement does not properly divide the cantilever dimensions!" 
         origin = ndarray([0.0, 0.0, 0.0])
 
         bin_file_name = folder + "mesh.bin"
@@ -146,6 +147,7 @@ class ShorterCantileverEnv3d (EnvBase):
         Allow to get images of the simulation
         """
         options = {
+            "parent_dir": self.folder,
             "file_name": file_name,
             "light_map": "uffizi-large.exr",
             "sample": 8,
@@ -156,7 +158,7 @@ class ShorterCantileverEnv3d (EnvBase):
         renderer = PbrtRenderer(options)
         transforms = [("s", 2.4), ("t", [0.0, -0.2, 0.25])]
 
-        tmp_bin_file_name = '.tmp.bin'
+        tmp_bin_file_name = f'{self.folder}/.tmp.bin'
         self._deformable.PySaveToMeshFile(ndarray(q), tmp_bin_file_name)
 
         mesh = HexMesh3d()

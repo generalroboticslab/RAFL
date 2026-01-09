@@ -129,6 +129,49 @@ const real Mesh<3, 8>::ComputeElementVolume(const Eigen::Matrix<real, 3, 8>& ele
 }
 
 template<>
+const Eigen::Matrix<real, 2, 1> Mesh<2, 3>::ElementSize(const int element_idx) const {
+    CheckError(false, "ElementSize is only defined for 3D hex meshes (Mesh<3,8>).");
+    return Eigen::Matrix<real, 2, 1>::Zero();
+}
+
+template<>
+const Eigen::Matrix<real, 2, 1> Mesh<2, 4>::ElementSize(const int element_idx) const {
+    CheckError(false, "ElementSize is only defined for 3D hex meshes (Mesh<3,8>).");
+    return Eigen::Matrix<real, 2, 1>::Zero();
+}
+
+template<>
+const Eigen::Matrix<real, 3, 1> Mesh<3, 4>::ElementSize(const int element_idx) const {
+    CheckError(false, "ElementSize is only defined for 3D hex meshes (Mesh<3,8>).");
+    return Eigen::Matrix<real, 3, 1>::Zero();
+}
+
+template<>
+const Eigen::Matrix<real, 3, 1> Mesh<3, 8>::ElementSize(const int element_idx) const {
+    const int element_num = static_cast<int>(elements_.cols());
+    CheckError(0 <= element_idx && element_idx < element_num, "Element index out of range.");
+
+    // Gather this element's vertex positions.
+    Eigen::Matrix<real, 3, 8> element;
+    for (int k = 0; k < 8; ++k) {
+        element.col(k) = vertices_.col(elements_(k, element_idx));
+    }
+
+    // We assume the usual ordering:
+    // 0: (0,0,0), 1: (0,0,1), 2: (0,1,0), 4: (1,0,0)
+    const Vector3r v000 = element.col(0);
+    const Vector3r v001 = element.col(1);
+    const Vector3r v010 = element.col(2);
+    const Vector3r v100 = element.col(4);
+
+    const real hx = (v100 - v000).norm();  // size along "x" edge
+    const real hy = (v010 - v000).norm();  // size along "y" edge
+    const real hz = (v001 - v000).norm();  // size along "z" edge
+
+    return Eigen::Matrix<real, 3, 1>(hx, hy, hz);
+}
+
+template<>
 const real Mesh<2, 3>::dx() const {
     CheckError(false, "dx is not defined for triangle meshes.");
     return 0;
@@ -145,10 +188,17 @@ const real Mesh<3, 4>::dx() const {
     return 0;
 }
 
+// template<>
+// const real Mesh<3, 8>::dx() const {
+//     return dx_;
+// }
+
 template<>
 const real Mesh<3, 8>::dx() const {
-    return dx_;
+    CheckError(false, "dx is not defined for hex meshes (anymore).");
+    return 0;
 }
+
 
 template<>
 const int Mesh<2, 3>::GetNumOfVerticesInFace() { return 2; }

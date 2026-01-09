@@ -76,74 +76,6 @@ def _make_mlp(in_dim, hidden_dims, out_dim, nonlinearity='gelu', no_bias=False, 
     layers.append(MLPBlock(d, out_dim, no_bias, None, None))
     return nn.Sequential(*layers)
 
-class DiagonalScale(nn.Module):
-    """
-    Learnable diagonal scaling layer: y = diag(w) * x
-    - Supports any input shape (..., N): scales the last dimension.
-    - No bias; just element-wise multiplicative parameters.
-    """
-
-    def __init__(self, n_features: int, init_scale: float = 1.0):
-        super().__init__()
-        self.weight = nn.Parameter(torch.full((n_features,), init_scale))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x * self.weight  # broadcast over leading dims
-
-class VarNorm1d(nn.Module):
-    """
-    Per-channel variance normalization (no mean subtraction).
-    Guarantees 0 -> 0. Works for (B,C) or (B,C,L).
-    """
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True):
-        super().__init__()
-        self.eps = eps
-        self.momentum = momentum
-        self.affine = affine
-        self.track_running_stats = track_running_stats
-
-        if affine:
-            self.weight = nn.Parameter(torch.ones(num_features, dtype=torch.float64))
-            self.bias = None  # keep bias None to preserve 0->0
-        else:
-            self.register_parameter('weight', None)
-            self.bias = None
-
-        if track_running_stats:
-            self.register_buffer('running_var', torch.ones(num_features, dtype=torch.float64))
-            self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
-        else:
-            self.register_parameter('running_var', None)
-            self.register_parameter('num_batches_tracked', None)
-
-    def eval(self):
-        super().eval()
-        # temporarily ignore running stats
-        self.track_running_stats = False
-        return self
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        assert x.dim() == 2, "Expected (B,C)"
-        dims = (0,)
-
-        # print(self.training or not self.track_running_stats)
-        if self.training or not self.track_running_stats:
-            var = x.var(dims, keepdim=False, unbiased=False)  # (C,)
-            if self.track_running_stats:
-                with torch.no_grad():
-                    self.num_batches_tracked += 1
-                    m = self.momentum
-                    self.running_var.lerp_(var, m)
-        else:
-            var = self.running_var
-
-        inv_std = torch.rsqrt(var + self.eps)                 # (C,)
-        shape = (1, -1) 
-        y = x * inv_std.view(*shape)                          # no mean subtraction, no bias
-        if self.affine:
-            y = y * self.weight.view(*shape)
-        return y
-
 
 class Unmodelled_Acceleration(nn.Module):
     def __init__(self, actuated, hidden_dims, nonlinearity, no_bias=True, normalize_inputs=True):
@@ -152,7 +84,6 @@ class Unmodelled_Acceleration(nn.Module):
         self.input_dim = 41 if self.actuated else 38
         self.normalize_inputs = normalize_inputs
         if self.normalize_inputs:
-            #self.normalize = VarNorm1d(self.input_dim)
             self.normalize = torch.nn.BatchNorm1d(self.input_dim, dtype=torch.float64)
 
         self.net = _make_mlp(in_dim=self.input_dim, hidden_dims=hidden_dims, out_dim=3,
@@ -165,7 +96,7 @@ class Unmodelled_Acceleration(nn.Module):
                             feat_spin,
                             feat_rigidMotion
                             ], dim=-1)
-        
+
         if self.actuated:
             feat = torch.cat([feat,
                                 feat_force
@@ -185,15 +116,11 @@ class Unmodelled_Acceleration(nn.Module):
         orig_shape = feat.shape[:-1]                            # (...,input_dim)
         feat = feat.reshape(-1,self.input_dim)                  # (N,input_dim)
 
-        # feat = torch.cat([feat[:,:-14], self.normalize(feat[:,-14:-11]), feat[:,-11:]], dim=-1)
-
         if self.normalize_inputs:
             norm_feat = self.normalize(feat)
             a = self.net(norm_feat).view(*orig_shape,3)
         else:
             a = self.net(feat).view(*orig_shape,3)
-        
-        # a = self.net(feat).view(*orig_shape,3)
 
         return a
 
@@ -208,7 +135,8 @@ class ElementResidual(nn.Module):
         self.register_buffer('mu', mu)                      # material Lame parameter mu
         self.register_buffer('lam', lam)                    # material Lame parameter lambda
         self.register_buffer('rho', rho)                    # material density
-        self._precompute_quadrature(X_e, dx)                # shape functions for FEM            
+        self._precompute_quadrature(X_e, dx)                # shape functions for FEM    
+        self._precompute_surface_offsets()        
 
         self.actuated = actuated
         if self.actuated:
@@ -222,10 +150,7 @@ class ElementResidual(nn.Module):
                                                         hidden_dims=num_hidden_layer*[hidden_size],
                                                         nonlinearity=nonlinearity,
                                                         no_bias=no_bias)   
-        # self.unmodelled_nn = Unmodelled_Stress(actuated=self.actuated, 
-        #                                                 hidden_dims=num_hidden_layer*[hidden_size],
-        #                                                 nonlinearity=nonlinearity,
-        #                                                 no_bias=no_bias)  
+
         self.changing_boundary_indices = changing_boundary_indices
 
     def _precompute_quadrature(self, X_e, dx):
@@ -278,6 +203,7 @@ class ElementResidual(nn.Module):
             # scale to physical coordinates with hx, hy, hz
             samples = samples * dx_t  # broadcast: (8,3) * (3,) -> (8,3)
 
+            # print(samples)
             # Precompute N and gradN for these samples (same for all hex elements)
             N_q_e = []
             gradN_q_e = []
@@ -332,15 +258,19 @@ class ElementResidual(nn.Module):
             sample_vol = vol_e / 8.0
             element_sample_volume_e = torch.full((8, 1), sample_vol, dtype=torch.float64)
 
+            element_sample_reference_J_e = torch.stack(8*[torch.linalg.inv(torch.diag(dx_t))])
+
             # Replicate for all elements
             N_q = [N_q_e for _ in range(E)]
             gradN_q = [gradN_q_e for _ in range(E)]
             element_sample_volume = [element_sample_volume_e for _ in range(E)]
+            element_sample_reference_J = [element_sample_reference_J_e for _ in range(E)]
 
             self.register_buffer('N_q', torch.stack(N_q, dim=0))                     # (E, Q=8, Ne=8)
             self.register_buffer('gradN_q', torch.stack(gradN_q, dim=0))             # (E, Q=8, Ne=8, 3)
             self.register_buffer('element_sample_volume',
                                 torch.stack(element_sample_volume, dim=0))          # (E, Q=8, 1)
+            self.register_buffer('element_sample_reference_J', torch.stack(element_sample_reference_J, dim=0)) # (E, Q=8, 3, 3)
 
         elif Ne == 4:
 
@@ -351,6 +281,7 @@ class ElementResidual(nn.Module):
             N_q = []                    # Shape function N
             gradN_q = []                # Shape function gradient ∇N
             element_sample_volume = []  # Element sample volume
+            element_sample_reference_J = []   # Element xyz scale
             for e in range(E):
 
                 N_q.append(torch.tensor(4 * [0.25], dtype=torch.float64))  # (Ne)
@@ -374,62 +305,337 @@ class ElementResidual(nn.Module):
                 vol_e = torch.abs(torch.det(J)) / 6.0                            # scalar
                 element_sample_volume.append(vol_e.reshape(1))                   # (1)
 
+                element_sample_reference_J.append(torch.linalg.inv(J))
+
             self.register_buffer('N_q', torch.stack(N_q, dim=0).unsqueeze(1))                 # (E, Q=1, Ne)
             self.register_buffer('gradN_q', torch.stack(gradN_q, dim=0).unsqueeze(1))         # (E, Q=1, Ne,3)
             self.register_buffer('element_sample_volume',
                                 torch.stack(element_sample_volume, dim=0).unsqueeze(1))      # (E, Q=1, 1)
+            self.register_buffer('element_sample_reference_J', torch.stack(element_sample_reference_J, dim=0).unsqueeze(1)) # (E, Q=1, 3, 3)
 
         else:
             # Current implementation only supports hex and tet mesh
             exit()
-        
 
+        self._precompute_COM()
+
+    def _precompute_COM(self,):
+
+        E, Ne = self.elements.shape
+        q0 = self.q0.reshape(-1,3)
+        q0_nodes = q0[self.elements, :]                                         # (E,Ne,3)
+        q0_e = torch.einsum('eni,eqn->eqi', q0_nodes, self.N_q)                 # (E,Q,3)
+
+        rho = self.rho.reshape(E,1,1)                                           # (E,1,1)
+        volume = self.element_sample_volume                                     # (E,Q,1)
+        m = rho * volume                                                        # (E,Q,1)
+        X_cm = (m * q0_e).sum(dim=[0,1]) / m.sum(dim=[0,1])                     # (3)
+
+        element2COM = torch.linalg.norm(X_cm.reshape(1,1,3) - q0_e, dim=-1).mean(dim=-1)       # (E,)
+
+        e_cm = torch.argmin(element2COM)
+
+        X_e = q0[self.elements[e_cm]]                                     # (Ne, 3)
+
+        if self._mesh_type == 'tet':
+
+            A = torch.stack([X_e[1] - X_e[0], X_e[2] - X_e[0], X_e[3] - X_e[0]], dim=1)     # (3,3)
+            u, v, w = torch.linalg.solve(A, (X_cm - X_e[0]).reshape(3, 1)).reshape(-1)      # (3,)
+            N_e = torch.stack([1.0 - (u + v + w), u, v, w], dim=0)                          # (Ne,)
+
+        elif self._mesh_type == 'hex':
+            
+            A = torch.stack([X_e[4]-X_e[0], X_e[2]-X_e[0], X_e[1]-X_e[0]], dim=1)           # (3,3)
+            nx, ny, nz = torch.linalg.solve(A, (X_cm - X_e[0]).reshape(3,1)).reshape(-1).clamp(0.,1.)    # (3,)
+            cnx, cny, cnz = 1.0 - nx, 1.0 - ny, 1.0 - nz
+
+            N_e = torch.stack([
+                        cnx * cny * cnz,   # N000
+                        cnx * cny * nz,    # N001
+                        cnx * ny * cnz,    # N010
+                        cnx * ny * nz,     # N011
+                        nx * cny * cnz,    # N100
+                        nx * cny * nz,     # N101
+                        nx * ny * cnz,     # N110
+                        nx * ny * nz,      # N111
+                    ], dim=0)                                                                  # (Ne,)
+            
+
+        
+        N_cm = torch.zeros((E,Ne), dtype=N_e.dtype, device=N_e.device)                         # (E, Ne)                   
+        N_cm[e_cm] = N_e
+
+        self.register_buffer('N_cm', N_cm)
+
+
+
+    def _precompute_surface_offsets(self, k=3, rel_tol=1e-6):
+
+        E, Ne = self.elements.shape
+        F = self.faces.shape[0]
+        
         q0 = self.q0.reshape(-1,3)
         Qf = q0[self.faces, :]
         face_positions = q0[self.faces, :].mean(1)
         element_positions = torch.einsum('eni,eqn->eqi', q0[self.elements, :], self.N_q) 
 
-        dist_to_face = []
-        dir_to_face = []
-        for e in range(E):
-            element_dist_to_face = []
-            element_dir_to_face = []
-            for q in range(element_positions[e].shape[0]):
-                sample_dir_to_face = face_positions - element_positions[e,q].unsqueeze(0)
-                sample_dist_to_face = torch.linalg.norm(sample_dir_to_face, dim=-1)
-
-                min_face = sample_dist_to_face.argmin()
-
-                if self._mesh_type == 'hex':
-                    # Collect Triangles
-                    tris = [(0,1,2), (0,2,3), (0,1,3), (3,1,2)]
-                    unnormalized_n = torch.zeros(3, dtype=q0.dtype, device=q0.device)     
-                    A_sum = torch.zeros(1, dtype=q0.dtype, device=q0.device)              
-                    for a, b, c in tris:
-                        p0, p1, p2 = Qf[min_face, a, :], Qf[min_face, b, :], Qf[min_face, c, :]             
-                        cp = torch.cross(p1 - p0, p2 - p1)                            
-                        unnormalized_n += cp                                                    
-                        A_sum += cp.norm()                                                      
-
-                    # Average area and norm over triangles
-                    A_f = A_sum / 4.0                                                           # (B,F,1)
-                    n_f = unnormalized_n / (unnormalized_n.norm() + 1e-12) 
-                elif self._mesh_type == 'tet':
-                    exit()
-                    # TO DO: implement tet dist to face
-
-
-                min_dist_to_face = (sample_dir_to_face[min_face] * n_f).sum()
-                element_dist_to_face.append(min_dist_to_face)
-                element_dir_to_face.append(n_f)
-            
-            dist_to_face.append(torch.tensor(element_dist_to_face))
-            dir_to_face.append(torch.stack(element_dir_to_face))
-        
         self.register_buffer('element_q0', element_positions)
-        self.register_buffer('dist2face', torch.stack(dist_to_face, dim=0).unsqueeze(2))
-        self.register_buffer('dir2face', torch.stack(dir_to_face, dim=0))
 
+        if self._mesh_type == 'hex':
+
+            Q = 8
+
+            # Collect Triangles
+            tris = [(0,1,2), (0,2,3), (0,1,3), (3,1,2)]
+            unnormalized_n = torch.zeros((F, 3), dtype=q0.dtype, device=q0.device)     # (F,3)
+            A_sum = torch.zeros((F, 1), dtype=q0.dtype, device=q0.device)              # (F,1)
+            for a, b, c in tris:
+                p0, p1, p2 = Qf[:, a, :], Qf[:, b, :], Qf[:, c, :]             # (F,3)
+                cp = torch.cross(p1 - p0, p2 - p1, dim=-1)                              # (F,3)
+                unnormalized_n += cp                                                    # (F,3)
+                A_sum += cp.norm(dim=-1, keepdim=True)                                  # (F,1)
+
+            # Average area and norm over triangles
+            A_f = A_sum / 4.0                                                           # (F,1)
+            n_f = unnormalized_n / unnormalized_n.norm(dim=-1, keepdim=True).clamp_min(1e-12)  # (F,3)
+
+            face2face_offset = face_positions.reshape(1,F,3) - face_positions.reshape(F,1,3) #(F,F,3)
+            face2face_dist = torch.sum(-n_f.reshape(F,1,3) * face2face_offset, dim=-1)  #(F,F)
+            face2face_offsetPerp = torch.linalg.norm(face2face_offset + face2face_dist.reshape(F,F,1) * n_f.reshape(F,1,3), dim=-1)  #(F,F)
+            
+            forward = face2face_dist >= 0 # (F,F)
+            facing = (-n_f.reshape(F,1,3) * n_f.reshape(1,F,3)).sum(dim=-1) > 0 #.8 #(F,F)
+            not_self = ~(torch.eye(F, dtype=torch.bool, device=q0.device)) #(F,F)
+            lateral_ok = face2face_offsetPerp <= torch.sqrt(A_f) / 2 # (F,F)
+
+            mask =  forward & lateral_ok & facing & not_self #(F,F)
+
+            valid_face2face_dist = torch.where(mask, face2face_dist, torch.full_like(face2face_dist, float("inf"))) #(F,F)
+
+            max_depth_per_face = valid_face2face_dist.min(dim=-1)[0] #(F)
+            self.register_buffer('max_depth', max_depth_per_face)
+            assert(torch.all(max_depth_per_face.isfinite()))
+
+            element_to_face_diff = face_positions.reshape(1,F,3) - element_positions.reshape(E*Q,1,3)   # (E*Q,F,3)
+            alignment = torch.sum(n_f.reshape(1,F,3) * element_to_face_diff, dim=-1) # (E*Q,F)
+            element_to_face_offsetPerp = torch.linalg.norm(element_to_face_diff - alignment.unsqueeze(-1) * n_f.reshape(1,F,3), dim=-1) # (E*Q,F)
+            element_to_face_dists = torch.cdist(element_positions.reshape(-1,3), face_positions, p=2)                 # (E*Q,F)
+            element_depth_per_face = alignment / max_depth_per_face.reshape(1,F) # (E*Q,F)
+
+            alignment_ok = alignment > 0
+
+            element_to_face_lateral_ok = element_to_face_offsetPerp <= torch.sqrt(A_f).reshape(1,F) / 2 
+
+            dists = torch.where(alignment_ok & element_to_face_lateral_ok, element_depth_per_face, float('inf')) # (E*Q,F)
+            _, min_dist_face_idx = torch.topk(dists, largest=False, k =k, dim=1)        # (E*Q,k)                        
+            idx = min_dist_face_idx.reshape(E*Q*k,1)                     # (E*Q*k,3)
+
+            self.register_buffer('target_faces_idx', idx)
+            target_face_positions = torch.gather(face_positions, dim=0, index=idx.expand(-1, 3)).reshape(E*Q,k,3)  # (E*Q*k,3)
+            target_face_normals = torch.gather(n_f, dim=0, index=idx.expand(-1, 3)).reshape(E*Q,k,3)               # (E*Q*k,3)
+            target_max_depth = torch.gather(max_depth_per_face, dim=0, index=idx.squeeze(-1)).reshape(E*Q,k)       # (E*Q*k,)
+
+            diff_to_faces = target_face_positions - element_positions.reshape(E*Q,1,3)                # (E*Q,k,3)
+            dist_to_faces = torch.sum(diff_to_faces * target_face_normals, dim =-1)     # (E*Q,k)
+            depth_to_faces = dist_to_faces / target_max_depth  # (E*Q,k)
+
+
+        elif self._mesh_type == 'tet':
+
+            Q = 1
+
+            # Single Triangle
+            p0, p1, p2 = Qf[:, 0, :], Qf[:, 1, :], Qf[:, 2, :]                 # (F,3)
+            cp   = torch.cross(p1 - p0, p2 - p1, dim=-1)                       # (F,3)
+            area_par = cp.norm(dim=-1, keepdim=True)                           # (F,1)
+            
+            # area and norm of triangles
+            A_f  = 0.5 * area_par                                              # (F,1)
+            n_f = cp / (area_par + 1e-12)                                      # (F,3)
+
+            # edges for barycentric coordinates
+            e1 = p1 - p0 # (F,3)
+            e2 = p2 - p0 # (F,3)
+
+            # Face normals projected to xyz directions (inward)
+            # Filter directions face is nearly parallel to
+            xyz = torch.eye(3, dtype = q0.dtype, device= q0.device) # (3,3)
+            dots = torch.einsum('fi,ai->fa', -n_f, xyz)              # (F,3)
+            dirs = torch.sign(dots).reshape(F,3,1) * xyz.reshape(1,3,3)  # (F,3,3)
+
+            # Origin and bases for barycentric coordinates
+            V0 = p0.reshape(1,1,F,3)       # (1,1,F,3)
+            E1 = e1.reshape(1,1,F,3)       # (1,1,F,3)
+            E2 = e2.reshape(1,1,F,3)       # (1,1,F,3)
+
+            # Factors for solving barycentric coordinates
+            # O + tD = V0 + uE1 + vE2
+            O = face_positions.reshape(F,1,1,3)  # (F,1,1,3)
+            # eps_face = 1e-6  # scale to your mesh edge length
+            # O = (face_positions - eps_face * n_f).reshape(F,1,1,3)  # n_f outward -> subtract goes inward
+            D = dirs.reshape(F,3,1,3)     # (F,3,1,3)
+            V0 = p0.reshape(1,1,F,3)       # (1,1,F,3)
+            E1 = e1.reshape(1,1,F,3)       # (1,1,F,3)
+            E2 = e2.reshape(1,1,F,3)       # (1,1,F,3)
+            
+            # Rearrange system to solve using Cramer's Rule
+            # T = O - V0 = uE1 + vE2 - tD
+            # u = det[T,D,E2] / det[E1,D,E2]
+            # v = det[D,T,E1] / det[E1,D,E2]
+            # t = det[E2,T,E1] / det[E1,D,E2]
+            T = O - V0                              # (F,1,F,3)
+            P = torch.cross(D, E2, dim=-1)          # (F,3,F,3)
+            S = torch.cross(T, E1, dim=-1)          # (F,1,F,3)
+            det = torch.sum(E1 * P, dim=-1)         # (F,3,F)
+            inv_det = torch.where(det.abs() > 1e-10, 1.0 / det, torch.zeros_like(det)) # (F,3,F)
+
+            # barycentric weights along E1, E2
+            u = torch.sum(T * P, dim=-1) * inv_det     # (F,3,F)
+            v = torch.sum(D * S, dim=-1) * inv_det     # (F,3,F)
+            t = torch.sum(E2 * S, dim=-1) * inv_det    # (F,3,F)
+
+            # Mask target faces
+            # target face "infront" respect to projection
+            forward = (t > 1e-10)    #(F,3,F)
+            # target face is NOT nearly coplanar with projection
+
+            #facing = (torch.sum(dirs.reshape(F,3,1,3) * dirs.transpose(0,1).reshape(1,3,F,3), dim=-1) < 0) # (F,3,F)
+            facing = det.abs() > 1e-10 # (F,3,F)
+            # intersection is inside the target triangle
+            lateral_ok = (u >= -1e-12) & (v >= -1e-12) & (u + v <= 1 + 1e-12) #(F,3,F)
+            # target face is not itself
+            not_self = ~(torch.eye(F, dtype=torch.bool, device=q0.device)).unsqueeze(1).expand(F,3,F) #(F,3,F)
+            # combined mask
+            mask =   forward & facing & lateral_ok & not_self
+
+            # max depth of face (xyz directions) is minimum among filtered distances
+            valid_face2face_dist = torch.where(mask, t, torch.full_like(t, float("inf")))  # (F,3,F)
+            max_depth_per_face = valid_face2face_dist.min(dim=-1)[0] #(F,3)
+
+            self.register_buffer('max_depth', max_depth_per_face)
+
+            # Element's depth from surfaces in +-xyz directions
+            origins = element_positions.reshape(E*Q,1,3).expand(E*Q, 6, 3) # (E*Q,6,3)
+            dirs6 = torch.tensor([
+                [ 1, 0, 0],
+                [-1, 0, 0],
+                [ 0, 1, 0],
+                [ 0,-1, 0],
+                [ 0, 0, 1],
+                [ 0, 0,-1],
+            ], device=q0.device, dtype=q0.dtype)  # (6,3)
+            
+            # Factor for solving barycentric coordinates
+            # O + tD = V0 + uE1 + vE2
+            O  = origins.reshape(E*Q,6,1,3)        # (E*Q,6,1,3)
+            D  = dirs6.reshape(1,6,1,3)             # (1,6,1,3)
+            
+            # Rearrange system to solve  using Cramer's Rule
+            # T = O - V0 = uE1 + vE2 - tD
+            # u = det[T,D,E2] / det[E1,D,E2]
+            # v = det[E1,T,D] / det[E1,D,E2]
+            # t = det[E1,E2,T] / det[E1,D,E2]
+            # (E*Q,6,1,3) - (1,1,F,3)
+            T = O - V0                                    # (E*Q,6,F,3)
+            # (1,6,1,3) x (1,1,F,3) 
+            P = torch.cross(D, E2, dim=-1)                # (1,6,F,3)
+            # (E*Q,6,F,3) x  (1,1,F,3)
+            S = torch.cross(T, E1, dim=-1)                # (E*Q,6,F,3)
+            # (1,1,F,3) . (1,6,F,3)
+            det = torch.sum(E1 * P, dim=-1)               # (1,6,F)
+            inv_det = torch.where(det.abs() > 1e-10, 1.0 / det, torch.zeros_like(det)) # (1,6,F)
+
+            # (E*Q,6,1,3) . (1,6,F,3)
+            u = torch.sum(T * P, dim=-1) * inv_det        # (E*Q,6,F)
+            # (1,6,1,3) . (E*Q,6,F,3)
+            v = torch.sum(D * S, dim=-1) * inv_det        # (E*Q,6,F)
+            # (1,1,F,3) . (E*Q,6,F,3)
+            t = torch.sum(E2 * S, dim=-1) * inv_det       # (E*Q,6,F)
+
+            # Mask target faces
+            # target face "infront" respect to direction
+            forward = (t > 1e-10)    # (E*Q,6,F)
+            # target face is NOT nearly coplanar with direction
+            facing = det.abs() > 1e-10 # (E*Q,6,F)
+            # intersection is inside the target triangle
+            lateral_ok = (u >= -1e-12) & (v >= -1e-12) & (u + v <= 1 + 1e-12) # (E*Q,6,F)
+            # combined mask
+            mask = forward & facing & lateral_ok # (E*Q,6,F)
+
+            # element distance to surface in each direction is minimum among filtered distances to faces
+            valid_element2face_dist = torch.where(mask, t, torch.full_like(t, float("inf"))) # (E*Q,6,F)
+            dist6, idx = torch.min(valid_element2face_dist, dim=2) # (E*Q,6)
+
+            # map +-xyz direction indices to xyz indices in {0,1,2}
+            axis6 = torch.arange(6, device=q0.device).view(1, 6).expand(E*Q, 6) // 2 # (E*Q,6) 
+
+            # get max depths of target surfaces
+            # ignore non-existant directions
+            idx = torch.where(torch.isfinite(dist6), idx, torch.full_like(idx, -1)) # (E*Q,6)
+            hit6 = idx.clamp_min(0)
+            valid_hit = (idx >= 0)  # (E*Q,6)
+
+            rows = max_depth_per_face[hit6]  # (E*Q,6,3)
+            maxd_face_axis = torch.gather(rows, dim=2, index=axis6.unsqueeze(-1)).squeeze(-1)
+
+            maxd_face_axis = torch.where(valid_hit, maxd_face_axis, torch.full_like(maxd_face_axis, float("inf")))
+
+            # invalid if: no hit, dist inf, maxd inf
+            invalid = ~valid_hit | (~torch.isfinite(maxd_face_axis))
+
+            # normalized depth = dist / max_depth(face,axis)
+            depth6 = dist6 / maxd_face_axis # (E*Q,6)
+            depth6 = torch.where(invalid, torch.full_like(depth6, float("inf")), depth6)  # (E*Q,6)
+
+            depth_to_faces, top_dir = torch.topk(depth6, largest=False, k =k, dim=1)        # (E*Q,k)    
+
+            dist_to_faces = torch.gather(dist6, dim=1, index=top_dir) # (E*Q,k)
+            
+            top_hit  = torch.gather(hit6,  dim=1, index=top_dir) # (E*Q,k)
+            
+            target_face_normals = dirs6[top_dir]  # (E*Q,k,3)
+            # print("target face normals: ", target_face_normals.shape)
+
+            for i in range(target_face_normals.shape[0]):
+                idx_max = torch.max(target_face_normals[i], dim=0)[0]
+                idx_min = torch.min(target_face_normals[i], dim=0)[0]
+
+                if torch.any(torch.abs(idx_max) + torch.abs(idx_min) > 1):
+                    print(idx[i])
+                    print(dist6[i])
+                    print(depth6[i])
+                    print(maxd_face_axis[i])
+                    print(depth_to_faces[i])
+                    print(target_face_normals[i])
+
+
+        else:
+            exit()
+        
+
+
+        w = torch.softmax(-depth_to_faces / 0.5, dim=1)
+
+        dir_to_face = (w.unsqueeze(-1) * target_face_normals.reshape(E*Q,k,3)).sum(dim=1)        # (E*Q,3)
+        dir_to_face = dir_to_face / dir_to_face.norm(dim=-1, keepdim=True).clamp_min(1e-12)      # (E*Q,3)
+    
+        dist_to_face = (w.unsqueeze(-1) * dist_to_faces.unsqueeze(-1)).sum(dim=1)        # (E*Q,1)
+        depth_to_face = (w.unsqueeze(-1) * depth_to_faces.unsqueeze(-1)).sum(dim=1)
+        
+
+        offset_to_face = dist_to_face * dir_to_face # (E*Q,3)
+        
+        # if self._mesh_type == 'hex':
+        #     max_offset_to_face = torch.abs(offset_to_face).max(dim=0, keepdim=True)[0] # (1,3)
+        # elif self._mesh_type == 'tet':
+        #     max_offset_to_face = torch.max(torch.linalg.norm(offset_to_face, dim=-1)) # (1,)
+        
+        max_offset_to_face = torch.abs(offset_to_face).max(dim=0, keepdim=True)[0] # (1,3)
+        norm_offset_to_face = offset_to_face / max_offset_to_face
+        
+        self.register_buffer('offset2face', offset_to_face.reshape(E,Q,3))
+        self.register_buffer('norm_offset2face', norm_offset_to_face.reshape(E,Q,3))
+        
 
     def to_elements(self, q):
         # q: (B,V,3) -> (B,E,Ne,3)
@@ -449,6 +655,12 @@ class ElementResidual(nn.Module):
 
     def sigma_R_from_F(self, F, eps=1e-12):
         
+
+        # U, sigma, Vh = torch.linalg.svd(F)                             # (N,3,3),(N,3),(N,3,3)
+        # R = U @ Vh 
+
+        # return sigma, R
+
         C = F.transpose(-1,-2) @ F
 
         evals, V = torch.linalg.eigh(C)                
@@ -500,9 +712,10 @@ class ElementResidual(nn.Module):
     
     def element_geom(self, q, v, m, r_mult=2, eps = 1e-12):
 
-        q_e = self.to_elements(q)                                                           # (B,E,Ne,3)
-        v_e = self.to_elements(v)                                                           # (B,E,Ne,3)
-        B,E,Ne,D = q_e.shape
+        
+        q_n = self.to_elements(q)                                                           # (B,E,Ne,3)
+        v_n = self.to_elements(v)                                                           # (B,E,Ne,3)
+        B,E,Ne,D = q_n.shape
         Q = self.N_q.shape[1]
 
         if self.changing_boundary_indices is not None:
@@ -513,48 +726,22 @@ class ElementResidual(nn.Module):
             q_base = self.q0[self.changing_boundary_indices].reshape(1,-1,3)                            # (1,V,3)
             q_offset = (q_boundary - q_base).mean(dim=1, keepdim=True).unsqueeze(1)                     # (B,1,1,3)
         else:
-            v_base = torch.zeros((B,1,1,3), device=v_e.device, dtype=v_e.dtype)                         # (B,1,1,3)
-            q_offset = torch.zeros((B,1,1,3), device=v_e.device, dtype=v_e.dtype)                       # (B,1,1,3)
-
-        # print(v_base)
-        # print(q_offset)
+            v_base = torch.zeros((B,1,1,3), device=v_n.device, dtype=v_n.dtype)                         # (B,1,1,3)
+            q_offset = torch.zeros((B,1,1,3), device=q_n.device, dtype=q_n.dtype)                       # (B,1,1,3)
+            q_boundary = torch.zeros((B,1,1,3), device=v_n.device, dtype=v_n.dtype )
 
         # Interpolate element nodes to samples
         # *_e: (B,E,Ne,*), N_q: (E,Q,Ne) -> q_e: (B,E,Q,*)
-        q_e = torch.einsum('beni,eqn->beqi', q_e, self.N_q.to(q_e.dtype))                   # (B,E,Q,3)
-        v_e = torch.einsum('beni,eqn->beqi', v_e - v_base, self.N_q.to(v_e.dtype))          # (B,E,Q,3)
+        q_e = torch.einsum('beni,eqn->beqi', q_n, self.N_q.to(q_n.dtype))                   # (B,E,Q,3)
+        v_e = torch.einsum('beni,eqn->beqi', v_n - v_base, self.N_q.to(v_n.dtype))          # (B,E,Q,3)
 
 
-        # dir2face = self.dir2face.unsqueeze(0).expand(B,E,Q,3)                                    # (B,E,Q,3)
-
-
-        # # Element Radii
-        # V_e = self.element_sample_volume.unsqueeze(0)                                               # (1,E,Q,1)
-        # h_e = (6.0 * V_e.sum(dim=2)).clamp_min(eps).pow(1.0 / 3.0)                                  # (1,E,1)
-        # r_e = (r_mult * h_e).unsqueeze(-1)                                                          # (1,E,1,1)
-
-
-        # # Mass of Intersection slice element samples
-        # q0 = self.element_q0.reshape(E*Q,1,3) #(E*Q,1,3)
-        # all_q0 = self.element_q0.reshape(E*Q,1,3) #(E*Q,1,3)
-        # all_target_q0 = self.element_q0.reshape(1,E*Q,3) #(1,E*Q,3)
-        # q0_2_q0 = (all_target_q0 - all_q0).reshape(1,E,Q,E*Q,3) #(E,Q,E*Q,3)
-        # q_rel_cross_srf = torch.linalg.norm(torch.cross(dir2face.reshape(B,E,Q,1,3), q0_2_q0, dim=-1), dim=-1)   #(B,E,Q,E*Q)
-        # m_slice = torch.where(q_rel_cross_srf < r_e, m.reshape(B,1,1,E*Q), 0).unsqueeze(-1)           #(B,E,Q,E*Q,1)
-        # M = m_slice.sum(dim=3) #(B,E,Q,1)
-
-        # q_sum = (m_slice * q_e.reshape(B,1,1,E*Q,3)).sum(dim=3)                  #(B,E,Q,3)
-        # q_cm = q_sum / M                                                         #(B,E,Q,3)
-        # v_sum = (m_slice * v_e.reshape(B,1,1,E*Q,3)).sum(dim=3)                  #(B,E,Q,3)
-        # v_cm = v_sum / M                                                         #(B,E,Q,3)
-
-        # Center of Mass using element densities
+        # # Center of Mass using element densities
         M = m.sum(dim=[1,2]).reshape(B,1,1,1)                                               # (B,1,1,1)
         q_sum = (m * q_e).sum(dim=[1,2]).reshape(B,1,1,3)                                   # (B,1,1,3)
         v_sum = (m * v_e).sum(dim=[1,2]).reshape(B,1,1,3)                                   # (B,1,1,3)
         q_cm = q_sum / M - q_offset                                                         # (B,1,1,3)
         v_cm = v_sum / M                                                                    # (B,1,1,3)
-
 
         # Relative position and velocity wrt Slice
         q_rel = q_e - q_cm                                                                  # (B,E,Q,3)
@@ -568,94 +755,17 @@ class ElementResidual(nn.Module):
 
         sL_rel = torch.cross(q_rel, v_rel, dim=-1)                                          # (B,E,Q,3)
 
-        L_cm = (m * torch.cross(q_rel, v_rel, dim=-1)).sum(dim=[1,2])                   # (B,3)
+        L_cm = (m * torch.cross(q_rel, v_rel, dim=-1)).sum(dim=[1,2])                       # (B,3)
 
         # Compute per-particle inertia contribution
-        r2 = (q_rel * q_rel).sum(dim=-1, keepdim=True).reshape(B,E,Q,1,1)                # (B,E,Q,1,1)
+        r2 = (q_rel * q_rel).sum(dim=-1, keepdim=True).reshape(B,E,Q,1,1)                   # (B,E,Q,1,1)
         eye = torch.eye(3, device=q_rel.device, dtype=q_rel.dtype).view(1,1,1,3,3)
         I_per = m.reshape(B,E,Q,1,1) * (r2 * eye - q_rel.reshape(B,E,Q,3,1) * q_rel.reshape(B,E,Q,1,3)) # (B,E,Q,3,3)
-        I_cm = I_per.sum(dim=[1,2])  # (B,3,3)
+        I_cm = I_per.sum(dim=[1,2])  # (B,3,3) 
 
         Omega_cm = torch.linalg.solve(I_cm, L_cm.reshape(B,3,1)).reshape(B,1,1,3)
 
-
         return q_rel, v_e, v_rel, v_rad, v_perp, sL_rel, q_cm, v_cm.expand(B,E,Q,3), Omega_cm.expand(B,E,Q,3)
-
-
-    def offset_to_faces(self, q, k=3):
-
-        q_e = self.to_elements(q)                                                                   # (B,E,Ne,3)
-        q_f = self.to_faces(q)                                                                      # (B,F,Nf,3)
-
-        B,E,Ne,D = q_e.shape
-        _, F, _, _ = q_f.shape
-        Q = self.N_q.shape[1]
-
-        face_positions = q_f.mean(2)                                                                # (B,F,3)
-        element_positions = torch.einsum('beni,eqn->beqi', q_e, self.N_q)                           # (B,E,Q,3)
-
-
-        dists = torch.cdist(element_positions.reshape(B,-1,3), face_positions, p=2)                 # (B,E*Q,F)
-
-        min_dist_face, min_dist_face_idx = torch.topk(dists, k, largest=False, dim=2)                           # (B,E*Q,k)                          # (B,E*Q)
-
-        idx = min_dist_face_idx.reshape(B,E*Q*k,1).expand(-1, -1, 3)                                   # (B,E*Q*k,3)
-
-
-        if self._mesh_type == 'hex':
-            # Collect Triangles
-            tris = [(0,1,2), (0,2,3), (0,1,3), (3,1,2)]
-            unnormalized_n = torch.zeros((B, F, 3), dtype=q.dtype, device=q.device)     # (B,F,3)
-            A_sum = torch.zeros((B, F, 1), dtype=q.dtype, device=q.device)              # (B,F,1)
-            for a, b, c in tris:
-                p0, p1, p2 = q_f[:, :, a, :], q_f[:, :, b, :], q_f[:, :, c, :]             # (B,F,3)
-                cp = torch.cross(p1 - p0, p2 - p1, dim=-1)                              # (B,F,3)
-                unnormalized_n += cp                                                    # (B,F,3)
-                A_sum += cp.norm(dim=-1, keepdim=True)                                  # (B,F,1)
-
-            # Average area and norm over triangles
-            A_f = A_sum / 4.0                                                           # (B,F,1)
-            n_f = unnormalized_n / unnormalized_n.norm(dim=-1, keepdim=True).clamp_min(1e-12)  # (B,F,3)
-
-        target_face_normals = torch.gather(n_f, dim=1, index=idx).reshape(B,E*Q,k,3)                # (B,E*Q,k,3)
-        target_face_positions = torch.gather(face_positions, dim=1, index=idx).reshape(B,E*Q,k,3)   # (B,E*Q,k,3)
-
-        diff_to_face = target_face_positions - element_positions.reshape(B,-1,1,3)                # (B,E*Q,k,3)
-
-        dist_to_face = torch.sum(diff_to_face * target_face_normals, dim =-1)       # (B,E*Q,k)
-        
-
-        mean_edge = (q_f[:, :, [0,1,2,3], :] - q_f[:, :, [1,2,3,0], :]).norm(dim=-1).mean(dim=[1,2]) # (B,)
-        tau = 0.5 * mean_edge.clamp_min(1e-12)
-
-        w = torch.softmax(-dist_to_face / tau.reshape(B,1,1), dim=2)              # (B,E*Q,k)
-
-        dir_to_face = (w.unsqueeze(-1) * target_face_normals).sum(dim=2)        # (B,E*Q,3)
-        dir_to_face = dir_to_face / dir_to_face.norm(dim=-1, keepdim=True).clamp_min(1e-12)
-        dist_to_face = (w.unsqueeze(-1) * dist_to_face.unsqueeze(-1)).sum(dim=2)        # (B,E*Q,1)
-        
-        #max_dist_to_face = (torch.sum(dir_to_face.reshape(B,E*Q,1,3) * dist_to_face.reshape(B,1,E*Q,1) * dir_to_face.reshape(B,1,E*Q,3), dim=-1)).max(dim=2)[0].reshape(B,E*Q,1)
-        max_dist_to_face = dist_to_face.max(dim=1,keepdim=True)[0]
-        norm_dist_to_face = dist_to_face / max_dist_to_face
-        offset_to_face = dist_to_face * dir_to_face # (B,E*Q,3)
-        norm_offset_to_face = norm_dist_to_face * dir_to_face # (B,E*Q,3)
-
-        return norm_offset_to_face.reshape(B,E,Q,3), dir_to_face.reshape(B,E,Q,3), norm_dist_to_face.reshape(B,E,Q,1)
-        
-        # B,_,_ = q.shape
-        # E,Q,_ = self.N_q.shape
-
-        # orig_dist_to_face = self.dist2face.reshape(1,E*Q,1).expand(B,E*Q,1)                           # (B,E*Q,1)
-        # orig_dir_to_face = self.dir2face.reshape(1,E*Q,3).expand(B,E*Q,3)                                # (B,E*Q,3)
-    
-        # orig_offset_to_face = orig_dist_to_face * orig_dir_to_face      # (B,E*Q,3)
-
-        # max_dist_to_face = (torch.sum(self.dir2face.reshape(E*Q,1,3) * self.dist2face.reshape(1,E*Q,1) * self.dir2face.reshape(1,E*Q,3), dim=-1)).max(dim=1)[0].reshape(1,E*Q,1)
-
-        # norm_dist_to_face = orig_dist_to_face / max_dist_to_face 
-        # norm_offset_to_face = orig_offset_to_face / max_dist_to_face                                   # (B,E*Q,3)
-
-        # return norm_offset_to_face.reshape(B,E,Q,3), orig_dir_to_face.reshape(B,E,Q,3), norm_dist_to_face.reshape(B,E,Q,1)
 
 
     @staticmethod
@@ -680,7 +790,11 @@ class ElementResidual(nn.Module):
 
         # Element Sample Distance to closest Forced Nodes
         P  = q_e.reshape(B, E * Q, 3)                                                               # (B,E*Q,3) 
-        dists = torch.cdist(P, q, p=2)                                                              # (B,E*Q,V)
+        dists = torch.zeros(B, E*Q,q.shape[1], dtype = P.dtype, device = P.device)
+
+        batch_size = 256
+        for batch in range(B//batch_size):
+            dists[:,batch_size * batch: min(batch_size * batch + 1, E*Q),:] = torch.cdist(P[:,batch_size * batch: min(batch_size * batch + 1, E*Q),:], q, p=2)                                                              # (B,E*Q,V)
         kmin_dists, kmin_idx = torch.topk(dists, k=k, dim=2, largest=False)                         # (B,E*Q,k)
         
         # Scale Sample Distance by Radii
@@ -749,13 +863,9 @@ class ElementResidual(nn.Module):
 
         F_e = self.element_deformationGrad(q)                                       # (B,E,Q,3,3)
         B,E,Q,_,_ = F_e.shape
-
-
-        # U, sigma, Vh = torch.linalg.svd(F_e)                                      # (B,E,Q,3,3),(B,E,Q,3),(B,E,Q,3,3)
-        # R = U @ Vh                                                                # (B,E,Q,3,3)
+                                                           
         sigma, R = self.sigma_R_from_F(F_e)
         Rt = R.transpose(-1, -2)                                                    # (B,E,Q,3,3)
-
 
         I1_F = sigma - 1.0                                                          # (B,E,Q,3)
         Cmat = F_e.transpose(-1,-2) @ F_e                                           # (B,E,Q,3,3)
@@ -777,6 +887,10 @@ class ElementResidual(nn.Module):
         I1_W = torch.stack([Wc[...,2,1], Wc[...,0,2], Wc[...,1,0]], dim=-1)         # (B,E,Q,3)
         I2_W = (2 * I1_W).norm(dim=-1, keepdim=True)                                # (B,E,Q,1)
 
+
+        # orig_offset2face = self.offset2face.reshape(1,E,Q,3).expand(B,E,Q,3)
+        orig_norm_offset2face = self.norm_offset2face.reshape(1,E,Q,3).expand(B,E,Q,3)
+
         rho = self.rho.reshape(1,E,1,1).expand(B,E,Q,1)                             # (B,E,Q,1)
         volume = self.element_sample_volume.unsqueeze(0)                            # (B,E,Q,1)
         m = rho * volume                                                            # (B,E,Q,1)
@@ -791,42 +905,15 @@ class ElementResidual(nn.Module):
         sL_rel_c = torch.einsum('beqij,beqj->beqi', Rt, sL_rel)                       # (B,E,Q,3)
         v_cm_c = torch.einsum('beqij,beqj->beqi', Rt, v_cm)                         # (B,E,Q,3)
         Omega_cm_c = torch.einsum('beqij,beqj->beqi', Rt, Omega_cm)                         # (B,E,Q,3)
+        
 
         q_rel_mag = q_rel.norm(dim=-1, keepdim=True)                                # (B,E,Q,1)
         v_e_mag = v_e.norm(dim=-1, keepdim=True)                                # (B,E,Q,1)
         v_rel_mag = v_rel.norm(dim=-1, keepdim=True)                                # (B,E,Q,1)
         v_cm_mag  = v_cm.norm(dim=-1, keepdim=True)                                 # (B,E,Q,1)
         Omega_cm_mag = Omega_cm.norm(dim=-1, keepdim=True)
-        # q_0 = self.q0.reshape(1,-1,3)
-        # q_centered = q_0 - q_0.mean(dim=1, keepdim=True)
-        # q_centered = self.to_elements(q_centered)                             # (1,E,Ne,3)
-        # q_centered = torch.einsum('beni,eqn->beqi', q_centered, self.N_q.to(q_centered.dtype))           # (1,E,Q,3)
-        # q_centered = q_centered.expand(B,E,Q,3)
-
-        # dist2face = self.dist2face.unsqueeze(0).expand(B,E,Q,1)
-        # dir2face = self.dir2face.unsqueeze(0).expand(B,E,Q,3) 
-        # normdist2face = (self.dist2face - self.dist2face.min()) / (self.dist2face.max() - self.dist2face.min())
-        # normdir2face = (normdist2face * self.dir2face).unsqueeze(0).expand(B,E,Q,3)
-
-        norm_offset2face, dir2face, normdist2face = self.offset_to_faces(q)
-        norm_offset2face_c = torch.einsum('beqij,beqj->beqi', Rt, norm_offset2face)         # (B,E,Q,3)
-        dir2face_c = torch.einsum('beqij,beqj->beqi', Rt, dir2face)         # (B,E,Q,3)
-        # max_dist_to_face = (torch.sum(dir2face_c.reshape(B,E*Q,1,3) * offset2face_c.reshape(B,1,E*Q,3), dim=-1)).max(dim=2)[0].reshape(B,E,Q,1)
-        # norm_offset2face_c = offset2face_c / max_dist_to_face
-
-        # max_offset2face_c = torch.abs(offset2face_c.reshape(B,E*Q,3)).max(dim=1)[0].reshape(B,1,1,3)                 # (B,1,3)
-        #norm_offset2face_c = offset2face_c / max_offset2face_c                                   # (B,E*Q,3)
-
-        # orig_dist_to_face = self.dist2face.expand(B,E,Q,1)                           # (B,E,Q,1)
-        # max_dist_to_face = orig_dist_to_face.reshape(B,E*Q,1).max(dim=1)[0].reshape(B,1,1,1)
-        # orig_offset2face = orig_dist_to_face * self.dir2face.expand(B,E,Q,3)      # (B,E*Q,3)
-
-        # max_offset2face = torch.abs(orig_offset2face.reshape(B,E*Q,3)).max(dim=1)[0].reshape(B,1,1,3)                 # (B,1,3)
-        # norm_offset2face_c = offset2face_c / max_offset2face                                   # (B,E,Q,3)
-        # norm_orig_offset2face = orig_offset2face.reshape(B,E,Q,3) / max_dist_to_face #max_offset2face
-        #norm_orig_dist2face = orig_dist_to_face / torch.linalg.norm(max_offset2face, dim=-1, keepdim=True)
         
-
+        
         # 13-dim features (co-rotated frame):
         feat_deformation = torch.cat([
                                         I1_F,                                       # principle stretches (3)
@@ -849,24 +936,12 @@ class ElementResidual(nn.Module):
                                 I2_W,                                               # vorticity magnitude (1)
                             ], dim=-1)                                              # (B,E,Q,4)
         
+        # print(feat_spin)
         # 11-dim features (co-rotated frame): 
         feat_rigidMotion = torch.cat([
-                                    #v_rad_c,
-                                    #v_perp_c,
-                                    norm_offset2face_c,
-                                    #dir2face_c,
-                                    #normdist2face,
-                                    #v_e_c,
-                                    #q_rel_c,
-                                    #v_rel_c,
-                                    #sL_rel_c,
-                                    # v_rel_srf_c,
+                                    orig_norm_offset2face,
                                     v_cm_c,
-                                    #Omega_cm_c,
-                                    #v_e_mag,
-                                    #v_rel_mag,
                                     v_cm_mag,
-                                    #Omega_cm_mag
                                 ], dim=-1)                                          # (B,E,Q,11)
 
         if self.actuated:
@@ -893,18 +968,6 @@ class ElementResidual(nn.Module):
 
         # Distribute to nodes
         fn = self.elementForce_to_nodeForce(f_e)                                    # (B,E,Ne,3)
-
-        # P_e_c = self.unmodelled_nn(feat_deformation,
-        #                                 feat_strainRate,
-        #                                 feat_spin,
-        #                                 feat_rigidMotion,
-        #                                 feat_force)                                 # (B,E,Q,3,3)
-
-        # rho = self.rho.reshape(1,E,1,1)
-        # P_e =  torch.einsum('beqij,beqjk->beqik', R, P_e_c)
-
-
-        # fn = rho * self.elementStress_to_nodeForce(P_e)
 
         output = self.elementNode_to_dof(fn)                                          # (B,3V) 
 

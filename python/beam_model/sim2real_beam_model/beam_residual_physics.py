@@ -16,8 +16,10 @@ from model import SupervisedLearningForward, PhysicsForward, LearningFoward
 from residual_physics.residual_physics import ResidualPhysicsBase
 from residual_physics.network import ResMLPResidual2, MLPResidual
 from validate_residual_physics import main as validate_main
-from residual_physics.element_force import ElementResidual
+from residual_physics.element_force_update import ElementResidual as UpdatedElementResidual
+from residual_physics.element_force import ElementResidual as OldElementResidual
 from py_diff_pd.common.common import ndarray
+from py_diff_pd.common.hex_mesh import get_boundary_face
 
 class CantileverResidualPhysics(ResidualPhysicsBase):
     def __init__(self, config, folder, options):
@@ -28,9 +30,10 @@ class CantileverResidualPhysics(ResidualPhysicsBase):
     def train(self, data_path, config):
         diffpd_model = self.diffpd_model
         if config["model"] == "skip_connection":
+            self.model_type = 'full'
             self.residual_network = ResMLPResidual2(diffpd_model._dofs * 2, diffpd_model._dofs, hidden_size=config['hidden_size'], num_mlp_blocks=config['num_mlp_blocks'], num_block_layer=config['num_hidden_layer'])
         elif config["model"] == "element":
-
+            self.model_type = 'element'
             la = (
                 diffpd_model._youngs_modulus
                 * diffpd_model._poissons_ratio
@@ -51,18 +54,59 @@ class CantileverResidualPhysics(ResidualPhysicsBase):
                 lam.append(la)
                 rho.append(diffpd_model._deformable.density())
             
+            surface_faces = get_boundary_face(mesh)
             elements = ndarray(elements)
             mu = ndarray(mu)
             lam = ndarray(lam)
             rho = ndarray(rho)
 
-            self.residual_network = ElementResidual(diffpd_model._dofs, 
+            self.residual_network = UpdatedElementResidual(diffpd_model._dofs, 
+                                                    torch.tensor(elements), 
+                                                    torch.tensor(surface_faces), 
+                                                    torch.tensor(mu), 
+                                                    torch.tensor(lam), 
+                                                    torch.tensor(rho), 
+                                                    diffpd_model._q0, 
+                                                    0.01,
+                                                    hidden_size=config['hidden_size'],
+                                                    num_hidden_layer=config['num_hidden_layer'],
+                                                    actuated=config['actuated']
+                                                    )
+        elif config["model"] == "element_old":
+            self.model_type = 'element'
+            la = (
+                diffpd_model._youngs_modulus
+                * diffpd_model._poissons_ratio
+                / ((1 + diffpd_model._poissons_ratio) * (1 - 2 * diffpd_model._poissons_ratio))
+            )
+            m = diffpd_model._youngs_modulus / (2 * (1 + diffpd_model._poissons_ratio))
+
+            mesh = diffpd_model._deformable.mesh()
+
+            elements = []
+            mu = []
+            lam = []
+            rho = []
+            num_elements = mesh.NumOfElements()
+            for e in range(num_elements):
+                elements.append(mesh.py_element(e))
+                mu.append(m)
+                lam.append(la)
+                rho.append(diffpd_model._deformable.density())
+            
+
+            elements = ndarray(elements)
+            mu = ndarray(mu)
+            lam = ndarray(lam)
+            rho = ndarray(rho)
+
+            self.residual_network = OldElementResidual(diffpd_model._dofs, 
                                                     torch.tensor(elements), 
                                                     torch.tensor(mu), 
                                                     torch.tensor(lam), 
                                                     torch.tensor(rho), 
                                                     diffpd_model._q0, 
-                                                    mesh.dx(),
+                                                    0.01,
                                                     hidden_size=config['hidden_size'],
                                                     num_hidden_layer=config['num_hidden_layer'],
                                                     actuated=config['actuated']
@@ -156,22 +200,31 @@ class CantileverResidualPhysics(ResidualPhysicsBase):
                 ) in training_loader:
                     batch_size = q_start_batch.shape[0]
                     if self.normalize:
-                        (
-                            q_start_batch,
-                            v_start_batch,
-                            f_optimized,
-                        ) = training_set.normalize(
-                            q_start_batch,
-                            v_start_batch,
-                            f_optimized,
-                        )
+                        if self.model_type == 'element':
+                            (
+                                f_optimized,
+                            ) = training_set.normalize(
+                                None,None,
+                                f_optimized, (None, None, None, None, f_mean, f_std)
+                            )
+                            q_start_batch = q_start_batch + training_set.q_init.unsqueeze(0)
+                        else:
+                            (
+                                q_start_batch,
+                                v_start_batch,
+                                f_optimized,
+                            ) = training_set.normalize(
+                                q_start_batch,
+                                v_start_batch,
+                                f_optimized,
+                            )
                     else:
-                        (
-                            f_optimized,
-                        ) = training_set.normalize(
-                            None,None,
-                            f_optimized, (None, None, None, None, f_mean, f_std)
-                        )
+                        # (
+                        #     f_optimized,
+                        # ) = training_set.normalize(
+                        #     None,None,
+                        #     f_optimized, (None, None, None, None, f_mean, f_std)
+                        # )
                         q_start_batch = q_start_batch + training_set.q_init.unsqueeze(0)
                     q_start_batch = q_start_batch.to(device)
                     v_start_batch = v_start_batch.to(device)
@@ -184,7 +237,7 @@ class CantileverResidualPhysics(ResidualPhysicsBase):
                         v_start_batch,
                         v_target_batch,
                         f_optimized,
-                    )
+                    ) * self.scaling
                     loss.backward()
                     if self.grad_clip is not None:
                         torch.nn.utils.clip_grad_norm_(
@@ -219,23 +272,32 @@ class CantileverResidualPhysics(ResidualPhysicsBase):
                         val_iter += 1
                         batch_size = q_start_batch.shape[0]
                         if self.normalize:
-                            (
-                                q_start_batch,
-                                v_start_batch,
-                                f_optimized,
-                            ) = training_set.normalize(
-                                q_start_batch,
-                                v_start_batch,
-                                f_optimized,
-                            )
+                            if self.model_type == 'element':
+                                (
+                                    f_optimized,
+                                ) = training_set.normalize(
+                                    None,None,
+                                    f_optimized, (None, None, None, None, f_mean, f_std)
+                                )
+                                q_start_batch = q_start_batch + training_set.q_init.unsqueeze(0)
+                            else:
+                                (
+                                    q_start_batch,
+                                    v_start_batch,
+                                    f_optimized,
+                                ) = training_set.normalize(
+                                    q_start_batch,
+                                    v_start_batch,
+                                    f_optimized,
+                                )
                         else:
-                            (
-                                f_optimized,
-                            ) = training_set.normalize(
-                                None,None,
-                                f_optimized, (None, None, None, None, f_mean, f_std)
-                            )
-                        q_start_batch = q_start_batch + training_set.q_init.unsqueeze(0)
+                            # (
+                            #     f_optimized,
+                            # ) = training_set.normalize(
+                            #     None,None,
+                            #     f_optimized, (None, None, None, None, f_mean, f_std)
+                            # )
+                            q_start_batch = q_start_batch + training_set.q_init.unsqueeze(0)
                         q_start_batch = q_start_batch.to(device)
                         v_start_batch = v_start_batch.to(device)
                         f_optimized = f_optimized.to(device)

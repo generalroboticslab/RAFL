@@ -14,8 +14,11 @@ from _visualization import plot_trajectory, plot_forces_norm
 from env_cantilever import CantileverEnv3d
 from env_cantilever_thicker import ThickerCantileverEnv3d
 from residual_physics.network import ResMLPResidual2, MLPResidual
-from residual_physics.element_force import ElementResidual
+from residual_physics.element_force_update import ElementResidual as UpdatedElementResidual
+from residual_physics.element_force import ElementResidual as OldElementResidual
 from py_diff_pd.common.common import ndarray
+from video_generation import *
+from py_diff_pd.common.hex_mesh import get_boundary_face
 
 args = argparse.ArgumentParser()
 args.add_argument("-model", dest="model", required=False)
@@ -32,7 +35,47 @@ def test_trajectory(
     elif training_options["model"] == "MLP":
         residual_network = MLPResidual(dofs*2, dofs)
     elif training_options['model'] == 'element':
-        g = training_options['state_force_parameters']
+        youngs_modulus = 215856
+        poissons_ratio = 0.45
+        la = (
+            youngs_modulus
+            * poissons_ratio
+            / ((1 + poissons_ratio) * (1 - 2 * poissons_ratio))
+        )
+        m = youngs_modulus / (2 * (1 + poissons_ratio))
+
+        mesh = cantilever._deformable.mesh()
+
+        elements = []
+        mu = []
+        lam = []
+        rho = []
+        num_elements = mesh.NumOfElements()
+        for e in range(num_elements):
+            elements.append(mesh.py_element(e))
+            mu.append(m)
+            lam.append(la)
+            rho.append(cantilever._deformable.density())
+        
+        surface_faces = get_boundary_face(mesh)
+        elements = ndarray(elements)
+        mu = ndarray(mu)
+        lam = ndarray(lam)
+        rho = ndarray(rho)
+
+        residual_network = UpdatedElementResidual(cantilever._dofs, 
+                                            torch.tensor(elements), 
+                                            torch.tensor(surface_faces), 
+                                            torch.tensor(mu), 
+                                            torch.tensor(lam), 
+                                            torch.tensor(rho),
+                                            cantilever._q0, 
+                                            0.01,
+                                            hidden_size=training_options['hidden_size'],
+                                            num_hidden_layer=training_options['num_hidden_layer'],
+                                            actuated=training_options['actuated']
+                                            )
+    elif training_options['model'] == 'element_old':
         youngs_modulus = 215856
         poissons_ratio = 0.45
         la = (
@@ -60,13 +103,13 @@ def test_trajectory(
         lam = ndarray(lam)
         rho = ndarray(rho)
 
-        residual_network = ElementResidual(cantilever._dofs, 
+        residual_network = OldElementResidual(cantilever._dofs, 
                                             torch.tensor(elements), 
                                             torch.tensor(mu), 
                                             torch.tensor(lam), 
                                             torch.tensor(rho),
                                             cantilever._q0, 
-                                            mesh.dx(),
+                                            0.01,
                                             hidden_size=training_options['hidden_size'],
                                             num_hidden_layer=training_options['num_hidden_layer'],
                                             actuated=training_options['actuated']
@@ -128,24 +171,36 @@ def test_trajectory(
     normalize = training_options["normalize"]
     #f_mean, f_std = torch.mean(training_set.fs.view(-1,3), dim=0).expand(q0.shape[0] // 3, 3).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(q0.shape[0] // 3, 3).flatten()
     f_mean, f_std = torch.zeros(q0.shape[0]).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(q0.shape[0] // 3, 3).flatten()
+    
+    Path(f"{save_folder}/thicker/visualizations/residual/{test_data_idx}").mkdir(parents=True, exist_ok=True)
+    Path(f"{save_folder}/thicker/visualizations/base/{test_data_idx}").mkdir(parents=True, exist_ok=True)
+    # cantilever.display_mesh(q_res.detach(), f"{save_folder}/thicker/visualizations/residual/{test_data_idx}/0.png")
+    # cantilever_sim.display_mesh(q_sim.detach(), f"{save_folder}/thicker/visualizations/base/{test_data_idx}/0.png")
+
     for frame_i in range(1, end_frame):
         if normalize:
-            (
-                q_res_normalized,
-                v_res_normalized,
-            ) = training_set.normalize(q=q_res - q_init, v=v_res)
-            res_force_normalized = residual_network(
-                torch.cat(
-                    (q_res_normalized, v_res_normalized),
-                    dim=0,
-                ).expand(1, -1)
-            )[0]
-            res_force = training_set.denormalize(f=res_force_normalized)[0]
+            if 'element' in training_options['model']:
+                res_force_normalized = residual_network(
+                torch.cat((q_res, v_res), dim=0)
+                )[0]
+                res_force = training_set.denormalize(f=res_force_normalized, normalization_params=(None, None, None, None, f_mean, f_std))[0]
+            else:
+                (
+                    q_res_normalized,
+                    v_res_normalized,
+                ) = training_set.normalize(q=q_res - q_init, v=v_res)
+                res_force_normalized = residual_network(
+                    torch.cat(
+                        (q_res_normalized, v_res_normalized),
+                        dim=0,
+                    ).expand(1, -1)
+                )[0]
+                res_force = training_set.denormalize(f=res_force_normalized)[0]
         else:
             res_force_normalized = residual_network(
                 torch.cat((q_res, v_res), dim=0)
             )[0]
-            res_force = training_set.denormalize(f=res_force_normalized, normalization_params=(None, None, None, None, f_mean, f_std))[0]
+            res_force = res_force_normalized
         #print(res_force.norm())
         #print(f_optimized[frame_i - 1, :].norm())
         #res_force_error = torch.norm(res_force - f_optimized[frame_i - 1, :])
@@ -168,6 +223,9 @@ def test_trajectory(
         qs_res.append(q_res.detach().numpy())
         vs_sim.append(v_sim.detach().numpy())
         vs_res.append(v_res.detach().numpy())
+        # cantilever.display_mesh(q_res.detach(), f"{save_folder}/thicker/visualizations/residual/{test_data_idx}/{frame_i}.png")
+        # cantilever_sim.display_mesh(q_sim.detach(), f"{save_folder}/thicker/visualizations/base/{test_data_idx}/{frame_i}.png")
+
     np.save(f"{save_folder}/thicker/qs_sim_{test_data_idx}.npy", qs_sim)
     np.save(f"{save_folder}/thicker/qs_res_{test_data_idx}.npy", qs_res)
     np.save(f"{save_folder}/thicker/vs_sim_{test_data_idx}.npy", vs_sim)
@@ -238,8 +296,11 @@ if __name__ == "__main__":
     default_cantilever = CantileverEnv3d(42, 'beam', hex_params)
     q_init = torch.from_numpy(cantilever._q0)
 
-    save_folder = f"training/test_refactor_element_new"
+    save_folder = f"training/test_refactor_element_zero_3"
     os.makedirs(f"{save_folder}/thicker/", exist_ok=True)
+    os.makedirs(f"{save_folder}/thicker/visualizations", exist_ok=True)
+    os.makedirs(f"{save_folder}/thicker/visualizations/residual", exist_ok=True)
+    os.makedirs(f"{save_folder}/thicker/visualizations/base", exist_ok=True)
     sim_errors = []
     res_errors = []
     for test_i in [2,7,11,14,16]:
@@ -261,3 +322,7 @@ if __name__ == "__main__":
     print(f"res error {res_errors.mean(-1).flatten().mean() * 1000:.3f}mm +-  {res_errors.mean(-1).flatten().std() * 1000:.3f} mm")
     np.save(f"{save_folder}/thicker/res_errors_residual_network.npy", sim_errors)
     np.save(f"{save_folder}/thicker/res_errors_residual_network.npy", res_errors)
+
+    # generate_video_directory(f"{save_folder}/thicker/visualizations/residual", [2,7,11,14,16], flag="")
+    # generate_video_directory(f"{save_folder}/thicker/visualizations/base", [2,7,11,14,16], flag="")
+

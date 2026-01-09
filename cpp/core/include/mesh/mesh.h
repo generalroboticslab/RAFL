@@ -46,6 +46,8 @@ public:
     const real element_volume(const int element_idx) const;
     const real average_element_volume() const { return average_element_volume_; }
 
+    const Eigen::Matrix<real, vertex_dim, 1> ElementSize(const int element_idx) const;
+
     // Transformation.
     void Scale(const real scale_factor);
 

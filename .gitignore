@@ -21,3 +21,6 @@ cantilever_data/*
 *.vtk
 python/sim_free/wandb/*
 *.tar.gz
+*.ipynb
+*.tmp
+*.exr

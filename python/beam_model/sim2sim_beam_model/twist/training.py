@@ -43,19 +43,20 @@ if __name__ == "__main__":
         config["cuda"] = 0
         config["normalize"] = False 
         config["Inialization"] = 1e-3
-        config["scale"] = 1#e6
+        config["scale"] = 1e3#e6
         config["data_type"] = "optimized"
         config["weight_decay"] = 1e-5
         config["fit"] = "forces"
         # config["fit"] = "SITL"
-        config["model"] = "element" #"skip_connection"
+        config["model"] = "element_old"
+        # config["model"] = "skip_connection"
         # config["model"] = "MLP"
         config["num_mlp_blocks"] = 5
-        config["hidden_size"] = 64 #512
+        config["hidden_size"] = 64
         config["actuated"] = True
-        config["num_hidden_layer"] = 4 #3
+        config["num_hidden_layer"] = 4
         # save_folder = f"training/sim2simResMLP5"
-        save_folder = f"training/test_refactor_element_new"
+        save_folder = f"training/test_refactor_element_zero_7"
         config["data_folder"] = save_folder.replace("training/", "")
         cantilever_residual = CantileverResidualPhysics(config, save_folder, params)
         torch.manual_seed(config["seed"])

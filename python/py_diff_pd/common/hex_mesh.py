@@ -3,13 +3,87 @@ import struct
 import numpy as np
 from py_diff_pd.core.py_diff_pd_core import HexMesh3d
 from py_diff_pd.common.common import ndarray
+from tqdm import tqdm
 
-# voxels: an 0-1 array of size cell_x_num * cell_y_num * cell_z_num.
+# # voxels: an 0-1 array of size cell_x_num * cell_y_num * cell_z_num.
+# def generate_hex_mesh(voxels, dx, origin, bin_file_name, write=True):
+#     origin = np.asarray(origin, dtype=np.float64)
+#     cell_x, cell_y, cell_z = voxels.shape
+#     node_x, node_y, node_z = cell_x + 1, cell_y + 1, cell_z + 1
+#     vertex_flag = np.full((node_x, node_y, node_z), -1, dtype=np.int)
+#     for i in range(cell_x):
+#         for j in range(cell_y):
+#             for k in range(cell_z):
+#                 if voxels[i][j][k]:
+#                     for ii in range(2):
+#                         for jj in range(2):
+#                             for kk in range(2):
+#                                 vertex_flag[i + ii][j + jj][k + kk] = 0
+
+#     vertex_cnt = 0
+#     vertices = []
+#     for i in range(node_x):
+#         for j in range(node_y):
+#             for k in range(node_z):
+#                 if vertex_flag[i][j][k] == 0:
+#                     vertex_flag[i][j][k] = vertex_cnt
+#                     vertices.append((origin[0] + dx * i,
+#                         origin[1] + dx * j,
+#                         origin[2] + dx * k))
+#                     vertex_cnt += 1
+
+#     voxel_indices = np.full((cell_x, cell_y, cell_z), -1, dtype=np.int)
+#     index = 0
+
+#     faces = []
+#     for i in range(cell_x):
+#         for j in range(cell_y):
+#             for k in range(cell_z):
+#                 if voxels[i][j][k]:
+#                     face = []
+#                     for ii in range(2):
+#                         for jj in range(2):
+#                             for kk in range(2):
+#                                 face.append(vertex_flag[i + ii][j + jj][k + kk])
+#                     faces.append(face)
+#                     voxel_indices[i, j, k] = index
+#                     index += 1
+
+#     vertices = np.asarray(vertices, dtype=np.float64).T
+#     faces = np.asarray(faces, dtype=np.int).T
+
+#     if write:
+#         with open(bin_file_name, 'wb') as f:
+#             f.write(struct.pack('i', 3))
+#             f.write(struct.pack('i', 8))
+#             # Vertices.
+#             f.write(struct.pack('i', 3))
+#             f.write(struct.pack('i', vertices.shape[1]))
+#             f.write(struct.pack('d' * vertices.size, *list(vertices.ravel())))
+
+#             # Faces.
+#             f.write(struct.pack('i', 8))
+#             f.write(struct.pack('i', faces.shape[1]))
+#             f.write(struct.pack('i' * faces.size, *list(faces.ravel())))
+
+#     return voxel_indices, vertex_flag
+
 def generate_hex_mesh(voxels, dx, origin, bin_file_name, write=True):
     origin = np.asarray(origin, dtype=np.float64)
+
+    # Allow dx to be either scalar or length-3 vector.
+    dx = np.asarray(dx, dtype=np.float64)
+    if dx.ndim == 0:
+        # Old behavior: isotropic cells.
+        dx = np.array([dx, dx, dx], dtype=np.float64)
+    assert dx.shape == (3,), "dx must be a scalar or a 3-vector [dx_x, dx_y, dx_z]."
+
+    dx_x, dx_y, dx_z = dx
+
     cell_x, cell_y, cell_z = voxels.shape
     node_x, node_y, node_z = cell_x + 1, cell_y + 1, cell_z + 1
-    vertex_flag = np.full((node_x, node_y, node_z), -1, dtype=np.int)
+
+    vertex_flag = np.full((node_x, node_y, node_z), -1, dtype=int)
     for i in range(cell_x):
         for j in range(cell_y):
             for k in range(cell_z):
@@ -26,12 +100,14 @@ def generate_hex_mesh(voxels, dx, origin, bin_file_name, write=True):
             for k in range(node_z):
                 if vertex_flag[i][j][k] == 0:
                     vertex_flag[i][j][k] = vertex_cnt
-                    vertices.append((origin[0] + dx * i,
-                        origin[1] + dx * j,
-                        origin[2] + dx * k))
+                    vertices.append((
+                        origin[0] + dx_x * i,
+                        origin[1] + dx_y * j,
+                        origin[2] + dx_z * k
+                    ))
                     vertex_cnt += 1
 
-    voxel_indices = np.full((cell_x, cell_y, cell_z), -1, dtype=np.int)
+    voxel_indices = np.full((cell_x, cell_y, cell_z), -1, dtype=int)
     index = 0
 
     faces = []
@@ -49,7 +125,7 @@ def generate_hex_mesh(voxels, dx, origin, bin_file_name, write=True):
                     index += 1
 
     vertices = np.asarray(vertices, dtype=np.float64).T
-    faces = np.asarray(faces, dtype=np.int).T
+    faces = np.asarray(faces, dtype=int).T
 
     if write:
         with open(bin_file_name, 'wb') as f:
@@ -67,6 +143,7 @@ def generate_hex_mesh(voxels, dx, origin, bin_file_name, write=True):
 
     return voxel_indices, vertex_flag
 
+    
 def hex2obj_with_texture_coords(hex_mesh, hex_mesh_texture_coords, pbrt_file_name,
     compute_normal):
     vertex_num = hex_mesh.NumOfVertices()
@@ -475,7 +552,7 @@ def voxelize(triangle_mesh_file_name, dx, feather=0.0, normalization_factor=Fals
     # Voxelization.
     cell_num = (ndarray(tri_mesh.bounding_box.extents) / dx).astype(np.int)
     voxels = np.zeros(cell_num)
-    for i in range(cell_num[0]):
+    for i in tqdm(range(cell_num[0])):
         for j in range(cell_num[1]):
             for k in range(cell_num[2]):
                 center = ndarray([i + 0.5, j + 0.5, k + 0.5]) * dx

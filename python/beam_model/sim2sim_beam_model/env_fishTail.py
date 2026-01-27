@@ -165,7 +165,7 @@ class FishTailEnv3d (EnvBase):
         mesh.Initialize(str(bin_file_name))
         deformable = HexDeformable()
         deformable.Initialize(str(bin_file_name), density, "none", youngs_modulus, poissons_ratio)
-        os.remove(bin_file_name)
+        # os.remove(bin_file_name)
 
         vert_num = mesh.NumOfVertices()
         verts = ndarray([ndarray(mesh.py_vertex(i)) for i in range(vert_num)])

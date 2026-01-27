@@ -1,7 +1,6 @@
 import sys
-
 sys.path.append("../")
-sys.path.append("../../")
+sys.path.append("../..")
 sys.path.append("../../..")
 import os
 import yaml
@@ -12,7 +11,6 @@ import argparse
 from _utils import CantileverDataset
 from _visualization import plot_trajectory, plot_forces_norm
 from env_cantilever import CantileverEnv3d
-from env_cantilever_thinner import ThinnerCantileverEnv3d
 from residual_physics.network import ResMLPResidual2, MLPResidual
 from residual_physics.element_force_update import ElementResidual
 from py_diff_pd.common.common import ndarray
@@ -20,7 +18,7 @@ from tqdm import tqdm
 from py_diff_pd.common.hex_mesh import get_boundary_face
 
 def train(
-    cantilever:CantileverEnv3d, save_folder, start_frame=0, end_frame=150, num_epochs=300, cantilever_sim=None, 
+    cantilever:CantileverEnv3d, save_folder, start_frame=0, end_frame=150, num_epochs=100, cantilever_sim=None, 
 ):
 
     if cantilever_sim is None:
@@ -86,7 +84,7 @@ def train(
     training_set = CantileverDataset(
     training_options["training_set"],
     cantilever._q0,
-    f"cantilever_data_sim2sim",
+    f"cantilever_data_fix_registration",
     start_frame=training_options["start_frame"],
     end_frame=training_options["end_frame"],
     )
@@ -103,18 +101,35 @@ def train(
     normalize = training_options["normalize"]
     f_mean, f_std = torch.zeros(training_set.q_init.shape[0]).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
     
-    
+    R,t = None, None
+
     total_loss_history = []
     val_loss_history = []
     with tqdm(num_epochs) as qbar:
         for epoch in range(num_epochs):
             train_loss = 0
             for data_idx in training_options["training_set"]:
-                target_trajectory_q = torch.from_numpy(np.load(f"data_real/trajectory{data_idx}.npy", allow_pickle=True)[()]['q'])[0]
-                target_trajectory_v = torch.from_numpy(np.load(f"data_real/trajectory{data_idx}.npy", allow_pickle=True)[()]['v'])[0]
+                qs_real_ = np.load("weight_data_ordered/q_data_reorder.npz")
+                steady_state = qs_real_[f'arr_0'][:, :, -1] * 1e-3
+
+                if epoch == 0 and data_idx == training_options['training_set'][0]:
+                    R, t = cantilever.fit_realframe(steady_state)
+                    steady_state_transformed = steady_state @ R.T + t
+                    cantilever.interpolate_markers_3d(cantilever._q0.reshape(-1,3), steady_state_transformed)
                 
-                q = target_trajectory_q[0].detach().clone()
-                v = target_trajectory_v[0].detach().clone()
+                qs_real = np.load(f'weight_data_ordered/qs_real{data_idx}_reorder.npy' )
+                target_data = qs_real * 1e-3
+                target_data_flatten = np.zeros((target_data.shape[0] * target_data.shape[1], target_data.shape[2]))
+                for i in range(150):
+                    target_data_tmp = target_data[:,:,i]
+                    target_data_tmp = target_data_tmp @ R.T + t
+                    target_data_flatten[:, i] = target_data_tmp.flatten()
+
+                target_data_flatten = torch.tensor(target_data_flatten, dtype=torch.float64)
+
+                q_arr = np.load(f"cantilever_data_fix_registration/q_force_opt{data_idx}_reorder.npz")['arr_%d' % (len(np.load(f"cantilever_data_fix_registration/q_force_opt{data_idx}_reorder.npz"))-1)]
+                q = torch.from_numpy(q_arr)
+                v = torch.zeros(cantilever.dofs, dtype=torch.float64)
 
                 optimizer.zero_grad()
                 total_loss = []
@@ -142,21 +157,23 @@ def train(
                                 )[0]
                                 res_force = training_set.denormalize(f=res_force_normalized.cpu())[0]
                         else:
-                            if 'element' in training_options['model']:
-                                res_force_normalized = residual_network(
-                                    torch.cat((q, v), dim=0).to(device)
-                                )[0]
-                            else:
-                                input_qv = torch.cat((q - q_init, v), dim=0).to(device)
-                                res_force_normalized = residual_network(
-                                    torch.cat((q - q_init, v), dim=0).expand(1, -1).to(device)
-                                )[0]
+                            res_force_normalized = residual_network(
+                                torch.cat((q, v), dim=0).to(device)
+                            )[0]
+                            # res_force = training_set.denormalize(f=res_force_normalized.cpu(), normalization_params=(None, None, None, None, f_mean, f_std))[0]
                             res_force = res_force_normalized.cpu()
 
                         q, v = cantilever.forward(q, v, f_ext=res_force, dt=0.01)
-                        data_loss = ((target_trajectory_q[frame_i] - q)**2).sum()
+
+                        qx = q.reshape(-1,3)
+
+                        qx_marker = cantilever.get_markers_3d(qx)
+
+                        data_loss = ((-qx_marker.flatten() + target_data_flatten[:,frame_i])**2).sum()
                         loss = data_loss 
                         total_loss.append(loss)
+
+                        
                     except Exception as e:
                         # Get the exception type name and message
                         exception_type = type(e).__name__
@@ -166,13 +183,9 @@ def train(
                         print("Failed full trajectory")
                         break
 
+                # total_loss = (torch.pow(decay_rate_cycle[epoch % 10], torch.arange(len(total_loss))) * torch.stack(total_loss)).mean() 
 
-                # weights = torch.pow(0.9, torch.arange(len(total_loss)))
-                # weights = weights / weights.sum()
-                # total_loss = training_options["scale"] * (weights * torch.stack(total_loss)).sum() 
-                
                 total_loss = training_options["scale"] * torch.stack(total_loss).mean() 
-
                 total_loss.backward()
                 optimizer.step()
                 train_loss += total_loss.item() 
@@ -183,11 +196,20 @@ def train(
             with torch.no_grad():
                 val_loss = 0
                 for data_idx in training_options["validate_set"]:
-                    target_trajectory_q = torch.from_numpy(np.load(f"data_real/trajectory{data_idx}.npy", allow_pickle=True)[()]['q'])[0]
-                    target_trajectory_v = torch.from_numpy(np.load(f"data_real/trajectory{data_idx}.npy", allow_pickle=True)[()]['v'])[0]
-                    
-                    q = target_trajectory_q[0].detach().clone()
-                    v = target_trajectory_v[0].detach().clone()
+
+                    qs_real = np.load(f'weight_data_ordered/qs_real{data_idx}_reorder.npy' )
+                    target_data = qs_real * 1e-3
+                    target_data_flatten = np.zeros((target_data.shape[0] * target_data.shape[1], target_data.shape[2]))
+                    for i in range(150):
+                        target_data_tmp = target_data[:,:,i]
+                        target_data_tmp = target_data_tmp @ R.T + t
+                        target_data_flatten[:, i] = target_data_tmp.flatten()
+
+                    target_data_flatten = torch.tensor(target_data_flatten, dtype=torch.float64)
+
+                    q_arr = np.load(f"cantilever_data_fix_registration/q_force_opt{data_idx}_reorder.npz")['arr_%d' % (len(np.load(f"cantilever_data_fix_registration/q_force_opt{data_idx}_reorder.npz"))-1)]
+                    q = torch.from_numpy(q_arr)
+                    v = torch.zeros(cantilever.dofs, dtype=torch.float64)
 
                     total_loss = []
                     for frame_i in range(1, end_frame):
@@ -215,20 +237,24 @@ def train(
                                     )[0]
                                     res_force = training_set.denormalize(f=res_force_normalized.cpu())[0]
                             else:
-                                if 'element' in training_options['model']:
-                                    res_force_normalized = residual_network(
-                                        torch.cat((q, v), dim=0).to(device)
-                                    )[0]
-                                else:
-                                    res_force_normalized = residual_network(
-                                        torch.cat((q - q_init, v), dim=0).expand(1, -1).to(device)
-                                    )[0]
+                                res_force_normalized = residual_network(
+                                    torch.cat((q, v), dim=0).to(device)
+                                )[0]
+                                # res_force = training_set.denormalize(f=res_force_normalized.cpu(), normalization_params=(None, None, None, None, f_mean, f_std))[0]
                                 res_force = res_force_normalized.cpu()
                             q, v = cantilever.forward(q, v, f_ext=res_force, dt=0.01)
-                            data_loss = ((target_trajectory_q[frame_i] - q)**2).sum()
+                            qx = q.reshape(-1,3)
+
+                            qx_marker = cantilever.get_markers_3d(qx)
+                            data_loss = ((-qx_marker.flatten() + target_data_flatten[:,frame_i].flatten())**2).sum()
                             loss = data_loss 
                             total_loss.append(loss)
-                        except:
+                        except Exception as e:
+                            # Get the exception type name and message
+                            exception_type = type(e).__name__
+                            exception_message = str(e)
+                            print(f"An error of type '{exception_type}' occurred: {exception_message}")
+                            # Output: An error of type 'NameError' occurred: name 'x' is not defined
                             print("Failed")
                             break
 
@@ -255,32 +281,42 @@ def train(
 
 
 if __name__ == "__main__":
-
+    poissons_ratio = 0.45
+    youngs_modulus = 215856
+    density = 1.07e3
+    state_force = [0, 0, -9.80709]
+    params = {
+        "density": density,
+        "youngs_modulus": youngs_modulus,
+        "poissons_ratio": poissons_ratio,
+        "state_force_parameters": state_force,
+        "mesh_type": "tet",
+        "refinement": 1,
+    }
+    
     config = {}
     config["seed"] = 42
-    config["epochs"] = 1000
+    config["epochs"] = 1000 
     config["batch_size"] = 256
-    config["learning_rate"] = 1e-3#5e-6
+    config["learning_rate"] = 1e-3
     config["optimizer"] = "adam"
     config["start_frame"] = 0
-    config["end_frame"] = 100
-    config["training_set"] = list(range(10))
-    config["validate_set"] = [10,11]
+    config["end_frame"] = 140
+    config["training_set"] = [0, 3, 4, 6, 8, 10, 12, 13, 17]
+    config["validate_set"] = [5, 15]
 
-    config["cuda"] = 1
-    config["normalize"] = False 
+    config["cuda"] = 5
+    config["normalize"] = False
     config["Inialization"] = 1e-3
-    config["scale"] = 1e3#e6
+    config["scale"] = 1e3
     config["data_type"] = "optimized"
     config["weight_decay"] = 1e-5
     config["fit"] = "forces"
-    # config["fit"] = "SITL"
     config["model"] = "element"
-    # config["model"] = "skip_connection"
-    config["num_mlp_blocks"] = 5
     config["hidden_size"] = 64
-    config["num_hidden_layer"] = 4
     config["actuated"] = True
+    config["num_hidden_layer"] = 4
+    config["num_mlp_blocks"] = 5
     config["normalize_inputs"] = False
 
 
@@ -299,7 +335,7 @@ if __name__ == "__main__":
     cantilever = CantileverEnv3d(42, 'beam', hex_params)
     q_init = torch.from_numpy(cantilever._q0)
 
-    save_folder = f"training/test_refactor_element_zero_transformer_direct_longer"
+    save_folder = f"training/test_refactor_element_zero_transformer_direct"
     os.makedirs(f"{save_folder}", exist_ok=True)
     
     config["data_folder"] = save_folder.replace("training/", "")
@@ -307,7 +343,7 @@ if __name__ == "__main__":
     with open(f'{save_folder}/config.yaml', 'w') as f:
         yaml.dump(hex_params, f)
         yaml.dump(config, f)
-
+    
     train(
-        cantilever, save_folder, end_frame=100, cantilever_sim=cantilever
+    cantilever, save_folder, end_frame=140, cantilever_sim=cantilever
     )

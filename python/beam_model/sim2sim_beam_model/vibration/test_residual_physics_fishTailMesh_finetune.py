@@ -345,7 +345,7 @@ if __name__ == "__main__":
     default_cantilever = CantileverEnv3d(42, 'beam', hex_params)
     q_init = torch.from_numpy(cantilever._q0)
 
-    save_folder = f"training/test_refactor_element_zero_3/fishTailMesh_finetune"
+    save_folder = f"training/test_refactor_element_zero_transformer_direct/fishTailMesh_finetune"
     os.makedirs(f"{save_folder}/", exist_ok=True)
     os.makedirs(f"{save_folder}/visualizations", exist_ok=True)
     os.makedirs(f"{save_folder}/visualizations/residual", exist_ok=True)

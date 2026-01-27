@@ -12,6 +12,7 @@ import torch
 from _utils import CantileverDataset
 from _visualization import plot_trajectory, plot_forces_norm
 from env_cantilever import CantileverEnv3d
+from env_cantilever_longer_scaled import LongerCantileverEnv3d
 from residual_physics.network import ResMLPResidual2, MLPResidual
 from residual_physics.element_force_update import ElementResidual as UpdatedElementResidual
 from residual_physics.element_force import ElementResidual as OldElementResidual
@@ -19,7 +20,7 @@ from py_diff_pd.common.common import ndarray
 from py_diff_pd.common.hex_mesh import get_boundary_face
 
 def test_trajectory(
-    cantilever:CantileverEnv3d, save_folder, test_data_idx, transformed_markers, start_frame=0, end_frame=150, cantilever_sim=None,
+    cantilever:CantileverEnv3d, save_folder, test_data_idx, transformed_markers, start_frame=0, end_frame=150, cantilever_sim=None, default_cantilever=None
 ):
     if cantilever_sim is None:
         cantilever_sim = cantilever
@@ -79,7 +80,7 @@ def test_trajectory(
                                             torch.tensor(lam), 
                                             torch.tensor(rho),
                                             cantilever._q0, 
-                                            0.01,
+                                            [0.012,0.01,0.01],
                                             hidden_size=training_options['hidden_size'],
                                             num_hidden_layer=training_options['num_hidden_layer'],
                                             actuated=training_options['actuated'],
@@ -132,22 +133,22 @@ def test_trajectory(
     print(residual_network.count_parameters())
     residual_network.eval()
 
-    ground_truth = np.load(
-        f"cantilever_data_fix_registration/optimized_data_{test_data_idx}.npy",
-        allow_pickle=True,
-    )[()]
-    f_optimized = torch.from_numpy(ground_truth["optimized_forces"]).t()[1:]
+    # ground_truth = np.load(
+    #     f"cantilever_data_straight/optimized_data_{test_data_idx}.npy",
+    #     allow_pickle=True,
+    # )[()]
+    # f_optimized = torch.from_numpy(ground_truth["optimized_forces"]).t()[1:]
     loss_fn = torch.nn.MSELoss(reduction="mean")
 
     training_set = CantileverDataset(
     training_options["training_set"],
-    cantilever._q0,
-    f"cantilever_data_fix_registration",
+    default_cantilever._q0,
+    f"cantilever_data_straight",
     start_frame=training_options["start_frame"],
     end_frame=training_options["end_frame"],
     )
 
-    q0 = torch.from_numpy(ground_truth["q_trajectory"][0])
+    q0 = torch.from_numpy(np.load(f"cantilever_data_longer_scaled_straight/q_force_opt{test_data_idx}_reorder.npz")['arr_%d' % (len(np.load(f"cantilever_data_longer_scaled_straight/q_force_opt{test_data_idx}_reorder.npz"))-1)])
     v0 = torch.zeros_like(q0)
     q_sim = q0.clone()
     v_sim = v0.clone()
@@ -169,11 +170,11 @@ def test_trajectory(
     vs_origin = []
     qs_origin.append(q_origin.detach().numpy())
     vs_origin.append(v_origin.detach().numpy())
-    res_force_errors = []
-    predicted_residual_force_norms = []
-    ground_truth_residual_force_norms = []
+    # res_force_errors = []
+    # predicted_residual_force_norms = []
+    # ground_truth_residual_force_norms = []
     normalize = training_options["normalize"]
-    cantilever.vis_dynamic_sim2real_markers(f"res_{test_data_idx}", q_res.detach().numpy(), cantilever.get_markers_3d(q_res.reshape(-1,3)).detach().numpy(), transformed_markers[0], frame=0)
+    cantilever.vis_dynamic_sim2real_markers(f"{save_folder.replace('training/', '')}/res_{test_data_idx}", q_res.detach().numpy(), cantilever.get_markers_3d(q_res.reshape(-1,3)).detach().numpy(), transformed_markers[0], frame=0)
     time_sim = 0
     time_res = 0
     time_origin = 0
@@ -184,6 +185,13 @@ def test_trajectory(
     #f_mean, f_std = torch.zeros(training_set.q_init.shape[0]).flatten(), torch.mean(torch.abs(training_set.fs.view(-1,3)), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
     # print(f_std[:3])
     # exit()
+
+    test_input = torch.cat([q_init, v0])
+
+    test_output = residual_network(test_input)
+
+    print(torch.mean(torch.abs(training_set.fs.view(-1,3)), dim=0))
+    print(torch.abs(test_output.reshape(-1,3)).mean(dim=0))
 
     #print(residual_network.unmodelled_nn(torch.zeros(13, dtype=torch.float64), torch.zeros(14, dtype=torch.float64), torch.zeros(4, dtype=torch.float64), torch.zeros(11, dtype=torch.float64), torch.zeros(3, dtype=torch.float64)))
     for frame_i in range(1, end_frame):
@@ -223,12 +231,14 @@ def test_trajectory(
             ti_end = time.time()
             time_network += ti_end - ti
             time_res += ti_end - ti
-        res_force_error = torch.norm((res_force - f_optimized[frame_i - 1, :]).reshape(-1,3), dim=-1)
-        predicted_residual_force_norms.append(torch.norm(res_force).item())
-        res_force_errors.append(res_force_error)
-        ground_truth_residual_force_norms.append(
-            torch.norm(f_optimized[frame_i - 1, :]).item()
-        )
+        # res_force_error = torch.norm((res_force - f_optimized[frame_i - 1, :]).reshape(-1,3), dim=-1)
+        # predicted_residual_force_norms.append(torch.norm(res_force).item())
+        # res_force_errors.append(res_force_error)
+        # ground_truth_residual_force_norms.append(
+        #     torch.norm(f_optimized[frame_i - 1, :]).item()
+        # )
+
+        # res_force = f_optimized[frame_i - 1, :]
         try:
             t0 = time.time()
             q_res, v_res = cantilever.forward(
@@ -253,19 +263,19 @@ def test_trajectory(
         vs_res.append(v_res.detach().numpy())
         qs_origin.append(q_origin.detach().numpy())
         vs_origin.append(v_origin.detach().numpy())
-    np.save(f"{save_folder}/qs_sim_{test_data_idx}.npy", qs_sim)
-    np.save(f"{save_folder}/qs_res_{test_data_idx}.npy", qs_res)
-    np.save(f"{save_folder}/vs_sim_{test_data_idx}.npy", vs_sim)
-    np.save(f"{save_folder}/vs_res_{test_data_idx}.npy", vs_res)
-    np.save(f"{save_folder}/qs_origin_{test_data_idx}.npy", qs_origin)
-    np.save(f"{save_folder}/vs_origin_{test_data_idx}.npy", vs_origin)
+    np.save(f"{save_folder}/longer_scaled/qs_sim_{test_data_idx}.npy", qs_sim)
+    np.save(f"{save_folder}/longer_scaled/qs_res_{test_data_idx}.npy", qs_res)
+    np.save(f"{save_folder}/longer_scaled/vs_sim_{test_data_idx}.npy", vs_sim)
+    np.save(f"{save_folder}/longer_scaled/vs_res_{test_data_idx}.npy", vs_res)
+    np.save(f"{save_folder}/longer_scaled/qs_origin_{test_data_idx}.npy", qs_origin)
+    np.save(f"{save_folder}/longer_scaled/vs_origin_{test_data_idx}.npy", vs_origin)
     qs_sim = np.array(qs_sim)
     qs_res = np.array(qs_res)
     qs_origin = np.array(qs_origin)
     
 
     pairs = [[0, 5], [1, 4], [2, 2], [3, 0], [4, 1], [5, 3]]
-    vis_1d_folder = f"2dplots_displacement/{save_folder.replace('training/', '')}_residual_network"
+    vis_1d_folder = f"longer_scaled_2dplots_displacement/{save_folder.replace('training/', '')}_residual_network"
     os.makedirs(vis_1d_folder, exist_ok=True)
     mm = 1.5 / 25.4
     sim_markers = []
@@ -304,17 +314,17 @@ def test_trajectory(
     sim_markers_error = np.linalg.norm(sim_markers[:real_frames] - transformed_markers[:real_frames], axis=-1)
     res_markers_error = np.linalg.norm(res_markers[:real_frames] - transformed_markers[:real_frames], axis=-1)
     origin_markers_error = np.linalg.norm(origin_markers[:real_frames] - transformed_markers[:real_frames], axis=-1)
-    predicted_residual_force_norms = np.array(predicted_residual_force_norms)
-    res_force_errors = torch.stack(res_force_errors,dim=0).detach().numpy()
+    # predicted_residual_force_norms = np.array(predicted_residual_force_norms)
+    # res_force_errors = torch.stack(res_force_errors,dim=0).detach().numpy()
     print(
         f"test id {test_data_idx} sim error {sim_markers_error.mean()*1e3:.3f}mm +-  {sim_markers_error.mean(-1).std()*1e3:.3f} mm"
     )
     print(
         f"res error {test_data_idx} {res_markers_error.mean()*1e3:.3f}mm +-  {res_markers_error.mean(-1).std()*1e3:.3f} mm"
     )
-    print(
-        f"res force error {test_data_idx} {res_force_errors.mean():.5f}N +-  {res_force_errors.mean(-1).std():.5f}N"
-    )
+    # print(
+    #     f"res force error {test_data_idx} {res_force_errors.mean():.5f}N +-  {res_force_errors.mean(-1).std():.5f}N"
+    # )
     print(f"origin error {origin_markers_error.mean()*1e3:.3f}mm +-  {origin_markers_error.mean(-1).std()*1e3:.3f} mm")
     print(f"Sim time {time_sim:.3f} s, Res time {time_res:.3f} s, origin time {time_origin:.3f} s, Network time {time_network:.3f} s")
     figsize = (44 * mm, 30 * mm)
@@ -329,48 +339,21 @@ def test_trajectory(
         real_frames,
         dt,
     )
-    plot_forces_norm(
-        vis_1d_folder,
-        test_data_idx,
-        figsize,
-        predicted_residual_force_norms,
-        ground_truth_residual_force_norms,
-        dt,
-    )
+    # plot_forces_norm(
+    #     vis_1d_folder,
+    #     test_data_idx,
+    #     figsize,
+    #     predicted_residual_force_norms,
+    #     ground_truth_residual_force_norms,
+    #     dt,
+    # )
 
     return sim_markers_error, res_markers_error, time_sim, time_res, time_network, origin_markers_error, time_origin
 
 if __name__ == "__main__":
-    youngs_modulus = 215856
-    poissons_ratio = 0.45
-    density = 1.07e3
-    state_force = [0, 0, -9.80709]
-    hex_params = {
-        'density': density,
-        'youngs_modulus': youngs_modulus,
-        'poissons_ratio': poissons_ratio,
-        'state_force_parameters': state_force,
-        'mesh_type': 'hex',
-        'refinement': 1,
-    }
+
     weights = [0.05, 0.06, 0.07, 0.1, 0.09, 0.08, 0.11, 0.12, 0.15, 0.09, 0.13, 0.14, 0.16, 0.17, 0.2,0.18,0.22,0.21]
 
-    cantilever = CantileverEnv3d(42, 'beam', hex_params)
-    hex_params['youngs_modulus'] = 810695.1
-    hex_params['poissons_ratio'] = 0.499
-    cantilever_sim = CantileverEnv3d(42, 'beam', hex_params)
-    q_init = torch.from_numpy(cantilever._q0)
-    q0 = torch.from_numpy(cantilever._q0)
-    q_ = q0.reshape(-1, 3)
-    v0 = torch.zeros(q0.shape, dtype=torch.float64)
-
-    qs_real_ = np.load("weight_data_ordered/q_data_reorder.npz")
-
-    steady_state = qs_real_[f'arr_0'][:, :, -1] * 1e-3
-    R, t = cantilever.fit_realframe(steady_state)
-    steady_state_transformed = steady_state @ R.T + t
-
-    cantilever.interpolate_markers_3d(q_.detach().numpy(), steady_state_transformed)
 
     save_folder = f"training/test_refactor_element_zero_transformer_direct"
     sim_errors = []
@@ -380,16 +363,59 @@ if __name__ == "__main__":
     time_res_total = 0
     time_origin_total = 0
     time_network_total = 0
-    os.makedirs(f"{cantilever._folder}/{save_folder.replace('training/', '')}", exist_ok=True)
-    os.makedirs(f"{cantilever._folder}/{save_folder.replace('training/', '')}", exist_ok=True)
-    for test_i in [2,7,11,14,16]:
+    os.makedirs(f"beam_longer/{save_folder.replace('training/', '')}", exist_ok=True)
+    os.makedirs(f"beam_longer/{save_folder.replace('training/', '')}", exist_ok=True)
+    os.makedirs(f"{save_folder}/longer_scaled", exist_ok=True)
+    for test_i in [13,14,15]: #[2,7,11,14,16]: 
+
+        youngs_modulus = 215856
+        poissons_ratio = 0.45
+        density = 1.07e3
+        state_force = [0, 0, -9.80709]
+        hex_params = {
+            'density': density,
+            'youngs_modulus': youngs_modulus,
+            'poissons_ratio': poissons_ratio,
+            'state_force_parameters': state_force,
+            'mesh_type': 'hex',
+            'refinement': 1,
+        }
+
+        cantilever = LongerCantileverEnv3d(42, 'beam_longer', hex_params)
+        hex_params['youngs_modulus'] = 240619.6  #810695.1
+        hex_params['poissons_ratio'] = 0.4951 #0.499
+        cantilever_sim = LongerCantileverEnv3d(42, 'beam', hex_params)
+        q_init = torch.from_numpy(cantilever._q0)
+        q0 = torch.from_numpy(cantilever._q0)
+        q_ = q0.reshape(-1, 3)
+        v0 = torch.zeros(q0.shape, dtype=torch.float64)
+
+        default_cantilever = CantileverEnv3d(42, 'beam', hex_params)
+
+        # qs_real_ = np.load("weight_data_ordered/q_data_reorder.npz")
+        # steady_state = qs_real_[f'arr_0'][:, :, -1] * 1e-3
+        
+        qs_real = np.load(f"data_longer/q{test_i}.npy")
+        steady_state = qs_real[0] * 1e-3
+        
+        R, t = cantilever.fit_realframe(steady_state)
+        # print(R,t)
+
+        # R = np.eye(3)
+        # t = np.zeros(3)
+        steady_state_transformed = steady_state @ R.T + t
+
+        cantilever.interpolate_markers_3d(q_.detach().numpy(), steady_state_transformed)
+
+
         print(f"test id {test_i}")
-        real_markers = np.load(f"weight_data_ordered/qs_real{test_i}_reorder.npy") * 1e-3
-        transformed_markers = np.zeros((150, 10,3))
+        #real_markers = np.load(f"weight_data_ordered/qs_real{test_i}_reorder.npy") * 1e-3
+        real_markers = qs_real[1:,:,:] * 1e-3
+        transformed_markers = np.zeros((150, 32,3))
         for i in range(150):
-            transformed_markers[i] = real_markers[:, :, i] @ R.T + t
+            transformed_markers[i] = real_markers[i, :, :] @ R.T + t
         sim_error, res_error, time_sim, time_res, time_network, origin_error, time_origin = test_trajectory(
-            cantilever, save_folder, test_i, transformed_markers, end_frame=140, cantilever_sim=cantilever_sim
+            cantilever, save_folder, test_i, transformed_markers, end_frame=140, cantilever_sim=cantilever_sim, default_cantilever=default_cantilever
         )
         time_res_total += time_res
         time_sim_total += time_sim
@@ -415,5 +441,5 @@ if __name__ == "__main__":
     print(f"sim error {sim_errors.mean(-1).flatten().mean() *1000 :.3f}mm +-  {sim_errors.mean(-1).flatten().std() * 1000:.3f} mm")
     print(f"res error {res_errors.mean(-1).flatten().mean() * 1000:.3f}mm +-  {res_errors.mean(-1).flatten().std() * 1000:.3f} mm")
     print(f"origin error {origin_error_mean.mean() * 1000:.3f}mm +-  {origin_errors.mean(-1).flatten().std() * 1000:.3f} mm")
-    np.save(f"{save_folder}/sim_errors_residual_network.npy", sim_errors)
-    np.save(f"{save_folder}/res_errors_residual_network.npy", res_errors)
+    np.save(f"{save_folder}/longer_scaled/sim_errors_residual_network.npy", sim_errors)
+    np.save(f"{save_folder}/longer_scaled/res_errors_residual_network.npy", res_errors)

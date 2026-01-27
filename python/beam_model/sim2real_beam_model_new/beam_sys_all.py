@@ -2,6 +2,7 @@ import sys
 sys.path.append('..')
 sys.path.append('../..')
 
+import os
 import time
 import scipy
 import numpy as np
@@ -16,7 +17,7 @@ seed = 42
 np.random.seed(seed)
 
 
-def system_identification (initial_real_markers, trajectories, num_frames, dt, verbose=False, folder="sysID"):
+def system_identification ( trajectories, num_frames, dt, verbose=False, folder="sysID"):
     """
     Fit the Young's Modulus of the arm model such that the simulated markers best match the real motion marker locations.
 
@@ -41,9 +42,6 @@ def system_identification (initial_real_markers, trajectories, num_frames, dt, v
     # opt = { 'max_pd_iter': 1000, 'max_ls_iter': 10, 'abs_tol': 1e-6, 'rel_tol': 1e-3, 'verbose': 0, 'thread_ct': 16, 'use_bfgs': 1, 'bfgs_history_size': 10 }
 
     ### Start Optimization
-    # x_lb = np.array([np.log(1.5e5), 0.3, -0.2, -0.2, -0.2])
-    # x_ub = np.array([np.log(1e7), 0.49, 0.2, 0.2, 0.2])
-    # x_init = np.array([np.log(2e5), 0.4, 0.0, 0.0, 0.1])    # 258321.2 # 263824
     x_lb = np.array([np.log(1.5e5), 0.3])
     x_ub = np.array([np.log(1e7), 0.499])
     x_init = np.array([np.log(2e5), 0.4])    # 258321.2 # 263824
@@ -58,12 +56,11 @@ def system_identification (initial_real_markers, trajectories, num_frames, dt, v
     loss_list = []
     E_list = []
     nu_list = []
-    # damping_list = []
+
     def loss_and_grad (x):
         ### Initialize Environment
         E = np.exp(x[0])
         nu = x[1]
-        # damping_param = np.array(x[2:]).reshape(1,3)
         E_list.append(E)
         nu_list.append(nu)
         #print(E)
@@ -75,20 +72,20 @@ def system_identification (initial_real_markers, trajectories, num_frames, dt, v
         total_loss = 0
         total_grad = 0
         for traj_i in trajectories:
-            initial_real_marker = initial_real_markers[f'arr_{traj_i}'][:,:,-1]*1e-3
+            qs_real = np.load(f'data/q{traj_i}.npy' )
+            initial_real_marker = qs_real[0,:,:]*1e-3
             # initial_real_marker = initial_real_markers[f'arr_10'][:,:,830]*1e-3
             R, t = env.fit_realframe(initial_real_marker)
             real_markers_init = initial_real_marker @ R.T + t
             env.interpolate_markers_3d(env._q0.reshape(-1,3), real_markers_init)
-            qs_real = np.load(f'weight_data_ordered/qs_real{traj_i}_reorder.npy' )
-            real_markers_old = qs_real * 1e-3
-            real_markers = np.zeros((real_markers_old.shape[2],real_markers_old.shape[0],real_markers_old.shape[1]),dtype=np.float64)
+            real_markers_old = qs_real[1:,:,:] * 1e-3
+            real_markers = np.zeros((real_markers_old.shape[0],real_markers_old.shape[1],real_markers_old.shape[2]),dtype=np.float64)
             for i in range(real_markers.shape[0]):
-                real_markers[i] = real_markers_old[:,:,i] @ R.T + t
+                real_markers[i] = real_markers_old[i,:,:] @ R.T + t
             env.qs_real_series = real_markers
             interpolated_marker = env.get_markers_3d(torch.from_numpy(env._q0.reshape(-1,3)))
             # env.vis_dynamic_sim2real_markers("vis_sysID_all", np.zeros_like(env._q0), torch.zeros_like(interpolated_marker), real_markers[-1])
-            data_info = np.load(f"cantilever_data_fix_registration/optimized_data_{traj_i}.npy", allow_pickle=True)[()]
+            data_info = np.load(f"cantilever_data_straight/optimized_data_{traj_i}.npy", allow_pickle=True)[()]
             qs = data_info['q_trajectory']
             q0 = qs[0]
             v0 = np.zeros_like(q0)
@@ -104,16 +101,12 @@ def system_identification (initial_real_markers, trajectories, num_frames, dt, v
             #     damping_force = (damping_param * v.reshape(-1,3)).reshape(-1)
             #     return damping_force
 
-            # loss, grad, info = env.simulate(dt, num_frames-1, method, env.opt, q0=q0, v0=v0, f_ext=f_ext, require_grad=True, vis_folder=None)
             loss, grad, info = env.simulate(dt, num_frames-1, method, env.opt, q0=q0, v0=v0, require_grad=True, vis_folder=None)
             
             # Compute gradient
             param_grad = np. array([
                 0.1 * info['material_parameter_gradients'][0] * np.exp(x)[0],
                 info['material_parameter_gradients'][1],
-                # 0.01 * np.sum(grad[3] * (np.array([[1, 0, 0]]) * np.array(info['v'][:-1]).reshape(-1,3)).reshape(num_frames-1, -1)),
-                # 0.01 * np.sum(grad[3] * (np.array([[0, 1, 0]]) * np.array(info['v'][:-1]).reshape(-1,3)).reshape(num_frames-1, -1)),
-                # 0.01 * np.sum(grad[3] * (np.array([[0, 0, 1]]) * np.array(info['v'][:-1]).reshape(-1,3)).reshape(num_frames-1, -1))
             ])
 
             total_loss += loss
@@ -122,7 +115,6 @@ def system_identification (initial_real_markers, trajectories, num_frames, dt, v
         total_loss /= len(trajectories)
         total_grad /= len(trajectories)
 
-        # print('loss: {:8.4e}, |grad|: {:8.3e}, forward time: {:6.2f}s, backward time: {:6.2f}s, E: {:.1f}, nu: {:.4f}, damping: [{:.6f}, {:.6f}, {:.6f}]'.format(total_loss, np.linalg.norm(total_grad), len(trajectories)*info['forward_time'], len(trajectories)*info['backward_time'], E, nu, damping_param[0,0], damping_param[0,1], damping_param[0,2]))
         print('loss: {:8.4e}, |grad|: {:8.3e}, forward time: {:6.2f}s, backward time: {:6.2f}s, E: {:.1f}, nu: {:.4f}'.format(total_loss, np.linalg.norm(total_grad), len(trajectories)*info['forward_time'], len(trajectories)*info['backward_time'], E, nu))
         loss_list.append(total_loss)
 
@@ -143,12 +135,10 @@ def system_identification (initial_real_markers, trajectories, num_frames, dt, v
 
         E_opt = np.exp(result.x[0])
         nu_opt = result.x[1]
-        # damping_opt = np.array(result.x[2:]).reshape(1,3)
         # nu_opt = 0.499
         print(f"Optimization time: {time.time()-t0:6.2f}s")
 
     finally: 
-        # damping_list = np.concatenate(damping_list, axis=0)
 
         ### Plotting Loss History
         fig, ax = plt.subplots(figsize=(4,3))
@@ -182,16 +172,6 @@ def system_identification (initial_real_markers, trajectories, num_frames, dt, v
         fig.savefig(f"{folder}/paramnu_history.png", dpi=300, bbox_inches='tight')
         plt.close()
 
-        # for i in range(damping_list.shape[1]):
-        #     fig, ax = plt.subplots(figsize=(4,3))
-        #     ax.plot(damping_list[:,i])
-        #     ax.set_xlim([0, len(damping_list[:,i])])
-        #     ax.set_title("Parameter History")
-        #     ax.set_xlabel("Epoch")
-        #     ax.set_ylabel(f"Damping Parameter {i}")
-        #     ax.grid()
-        #     fig.savefig(f"{folder}/paramdamping{i}_history.png", dpi=300, bbox_inches='tight')
-        #     plt.close()
 
         # Scatter plot of E vs nu with loss as contour plot in background
         fig, ax = plt.subplots(figsize=(4,3))
@@ -211,11 +191,8 @@ def system_identification (initial_real_markers, trajectories, num_frames, dt, v
         np.savetxt(f"{folder}/loss_history.txt", np.array(loss_list))
         np.savetxt(f"{folder}/paramE_history.txt", np.array(E_list))
         np.savetxt(f"{folder}/paramnu_history.txt", np.array(nu_list))
-        # np.savetxt(f"{folder}/paramdamping_history.txt", damping_list)
 
-    # return E_opt, nu_opt, damping_opt
     return E_opt, nu_opt
-
 
 
 def run_simulation (trajectories, youngs_modulus, poisson_ratio, dt=0.01, folder="sysID"):
@@ -241,7 +218,7 @@ def run_simulation (trajectories, youngs_modulus, poisson_ratio, dt=0.01, folder
     num_trajectories = len(trajectories)
     qs_sim = [[] for _ in range(num_trajectories)]
     for idx, traj_i in enumerate(trajectories):
-        data_info = np.load(f"cantilever_data_fix_registration/optimized_data_{traj_i}.npy", allow_pickle=True)[()]
+        data_info = np.load(f"cantilever_data_straight/optimized_data_{traj_i}.npy", allow_pickle=True)[()]
         qs = data_info['q_trajectory']
         fixed_dt = 0.01 # Data collected at 100Hz
         start_time = time.time()
@@ -255,9 +232,8 @@ def run_simulation (trajectories, youngs_modulus, poisson_ratio, dt=0.01, folder
         # Iterate over all frames
         for frame_i in range(1, num_frames):
             #f_ext = torch.zeros(env.dofs, dtype=torch.float64)
-            # damping_force = (damping_param * v.detach().numpy().reshape(-1,3)).reshape(-1)
-            # q, v = env.forward(q, v, f_ext=torch.from_numpy(damping_force), dt=dt)
             q, v = env.forward(q, v, f_ext=torch.zeros_like(q), dt=dt)
+            
             # Append simulated markers
             qs_sim[idx].append(q.reshape(-1,3))
 
@@ -276,25 +252,22 @@ if __name__ == "__main__":
     dt = 0.01
     trajectories = [0, 3, 4, 6, 8, 10, 12, 13, 17]
     #trajectories = [0]
-    test_trajectories = [2, 7, 9, 11, 14, 16]
+    test_trajectories = [2, 7, 11, 14, 16]
     #test_trajectories = trajectories
     num_frames = 140
     folder = "SysID_beam_damping"
-
+    os.makedirs(folder, exist_ok=True)
     ### Loading Real Data
-    qs_real_ = np.load("weight_data_ordered/q_data_reorder.npz")
     # print(steady_state)
     base_youngs_modulus = 200000
     base_poisson_ratio = 0.4
     base_damping_param = np.array([[0.0, 0.0, 0.0]])
-    opt_youngs_modulus = 6275138.3
-    opt_poisson_ratio = 0.49
-    opt_damping_param = np.array([[0.001, 0.001, -0.2]])
-    # opt_youngs_modulus, opt_poisson_ratio, opt_damping_param = system_identification(qs_real_, trajectories, num_frames, dt, verbose=True, folder=folder)
-    opt_youngs_modulus, opt_poisson_ratio = system_identification(qs_real_, trajectories, num_frames, dt, verbose=True, folder=folder)
+    # opt_youngs_modulus = 6275138.3
+    # opt_poisson_ratio = 0.49
+    # opt_damping_param = np.array([[0.001, 0.001, -0.2]])
+    opt_youngs_modulus, opt_poisson_ratio = system_identification(trajectories, num_frames, dt, verbose=True, folder=folder)
     print(f"Optimized Young's Modulus: {opt_youngs_modulus:.1f}")
     print(f"Optimized Poisson's Ratio: {opt_poisson_ratio:.4f}")
-    # print(f"Optimized Damping Parameter: {opt_damping_param[0,0], opt_damping_param[0,1], opt_damping_param[0,2]}")
 
 
     ### Run initial and final simulation metrics
@@ -302,10 +275,8 @@ if __name__ == "__main__":
     downsample_factor = 1.0
 
     ### Run initial and final simulation metrics
-    # env, qs_sim = run_simulation(test_trajectories, base_youngs_modulus, base_poisson_ratio, base_damping_param, dt*downsample_factor, folder=folder)
-    # _, qs_sim_opt = run_simulation(test_trajectories, opt_youngs_modulus, opt_poisson_ratio, opt_damping_param, dt*downsample_factor, folder=folder)
-    env, qs_sim = run_simulation(test_trajectories, base_youngs_modulus, base_poisson_ratio, dt*downsample_factor, folder=folder)
-    _, qs_sim_opt = run_simulation(test_trajectories, opt_youngs_modulus, opt_poisson_ratio, dt*downsample_factor, folder=folder)
+    env, qs_sim = run_simulation(test_trajectories, base_youngs_modulus, base_poisson_ratio,  dt*downsample_factor, folder=folder)
+    _, qs_sim_opt = run_simulation(test_trajectories, opt_youngs_modulus, opt_poisson_ratio,  dt*downsample_factor, folder=folder)
     qs_sim = qs_sim[:, ::int(1/downsample_factor)]
     qs_sim_opt = qs_sim_opt[:, ::int(1/downsample_factor)]
 
@@ -319,14 +290,17 @@ if __name__ == "__main__":
     sim_markers_opt = [[] for _ in range(len(test_trajectories))]
     real_markers_series = []
     for idx, traj_i in enumerate(test_trajectories):
-        steady_state = qs_real_[f"arr_{traj_i}"][:, :, -1] * 1e-3
+
+        qs_real = np.load(f'data/q{traj_i}.npy' )
+
+        steady_state = qs_real[0,:,:] * 1e-3
         R, t = env.fit_realframe(steady_state)
         real_marker = steady_state @ R.T + t
         env.interpolate_markers_3d(env._q0.reshape(-1,3), real_marker)
 
-        qs_real = np.load(f'weight_data_ordered/qs_real{traj_i}_reorder.npy' )
-        real_markers_old = qs_real * 1e-3
-        real_markers = np.transpose(real_markers_old[:,:,:num_frames], [2, 0, 1]) @ R.T + t
+
+        real_markers_old = qs_real[1:,:,:] * 1e-3
+        real_markers = real_markers_old[:num_frames:,:] @ R.T + t
         real_markers_series.append(real_markers)
 
         for frame_i in range(num_frames):

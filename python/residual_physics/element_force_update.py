@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.autograd as autograd
 from torch import Tensor
 from einops.layers.torch import Rearrange
+from einops import rearrange
 import numpy as np
 
 def init_weight(m: nn.Module) -> None:
@@ -65,15 +66,19 @@ class MLPBlock(nn.Module):
         x = self.nonlinearity(x)
         return x
 
-def _make_mlp(in_dim, hidden_dims, out_dim, nonlinearity='gelu', no_bias=False, norm=None):
+def _make_mlp(in_dim, hidden_dims, out_dim, nonlinearity='gelu', no_bias=False, norm=None, dropout=None, last_nonlinearity=False):
     act = get_nonlinearity(nonlinearity)
 
     layers = []
     d = in_dim
     for h in hidden_dims:
         layers.append(MLPBlock(d, h, no_bias, norm, nonlinearity))
+        if dropout is not None:
+            layers.append(nn.Dropout(dropout))
         d = h
-    layers.append(MLPBlock(d, out_dim, no_bias, None, None))
+    layers.append(MLPBlock(d, out_dim, no_bias, None, None if not last_nonlinearity else nonlinearity))
+    if dropout is not None:
+        layers.append(nn.Dropout(dropout))
     return nn.Sequential(*layers)
 
 
@@ -94,12 +99,12 @@ class Unmodelled_Acceleration(nn.Module):
         feat = torch.cat([feat_deformation,
                             feat_strainRate,
                             feat_spin,
-                            feat_rigidMotion
+                            feat_rigidMotion[:,:,:,:7]
                             ], dim=-1)
 
         if self.actuated:
             feat = torch.cat([feat,
-                                feat_force
+                                feat_force[:,:,:,:3]
                                 ], dim=-1)
         
 
@@ -125,13 +130,147 @@ class Unmodelled_Acceleration(nn.Module):
         return a
 
 
+class VarNorm1d(nn.Module):
+    """
+    Per-channel variance normalization (no mean subtraction).
+    Guarantees 0 -> 0. Works for (B,C) or (B,C,L).
+    """
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True):
+        super().__init__()
+        self.eps = eps
+        self.momentum = momentum
+        self.affine = affine
+        self.track_running_stats = track_running_stats
+
+        if affine:
+            self.weight = nn.Parameter(torch.ones(num_features, dtype=torch.float64))
+            self.bias = None  # keep bias None to preserve 0->0
+        else:
+            self.register_parameter('weight', None)
+            self.bias = None
+
+        if track_running_stats:
+            self.register_buffer('running_var', torch.ones(num_features, dtype=torch.float64))
+            self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
+        else:
+            self.register_parameter('running_var', None)
+            self.register_parameter('num_batches_tracked', None)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        assert x.dim() == 2, "Expected (B,C)"
+        dims = (0,)
+        # print("training:", self.training)
+        # print("track:", self.track_running_stats)
+        if self.training or not self.track_running_stats:
+            var = x.var(dims, keepdim=False, unbiased=False)  # (C,)
+            if self.track_running_stats:
+                with torch.no_grad():
+                    self.num_batches_tracked += 1
+                    m = self.momentum
+                    self.running_var.lerp_(var, m)
+        else:
+            var = self.running_var
+            # print("eval")
+
+        inv_std = torch.rsqrt(var + self.eps)                 # (C,)
+        shape = (1, -1) 
+        y = x * inv_std.view(*shape)                          # no mean subtraction, no bias
+        if self.affine:
+            y = y * self.weight.view(*shape)
+        return y
+
+
+class FeedForward(nn.Module):
+    def __init__(self, input_dim, hidden_dims, output_dim, nonlinearity, no_bias=True, normalize_inputs=True, dropout = 0.1, last_nonlinearity=False):
+        super().__init__()
+
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.normalize_inputs = normalize_inputs
+
+        if self.normalize_inputs:
+            if no_bias:
+                self.normalize = VarNorm1d(self.input_dim)
+            else:
+                self.normalize = torch.nn.BatchNorm1d(self.input_dim, dtype=torch.float64)
+
+        self.net = _make_mlp(in_dim=self.input_dim, hidden_dims=hidden_dims, out_dim=self.output_dim,
+                             nonlinearity=nonlinearity, no_bias=no_bias, dropout=dropout, last_nonlinearity=last_nonlinearity)
+
+    def forward(self, x):
+
+        if self.normalize_inputs:
+            x = self.normalize(x)
+
+        return self.net(x)
+
+class Unmodelled_Acceleration_Separated(nn.Module):
+    def __init__(self, actuated, dim_head, heads, hidden_dims, nonlinearity, normalize_inputs=True, dropout = None):
+    # def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout = 0.):
+        super().__init__()
+
+        self.actuated = actuated
+        self.dim_head = dim_head
+        self.heads = heads
+        self.normalize_inputs = normalize_inputs
+
+        self.condition_dim = 7 
+        self.feat_dim = 34 if self.actuated else 31
+
+        self.nonlinearity = get_nonlinearity(nonlinearity)
+        
+        self.to_q = FeedForward(self.condition_dim, [8], self.dim_head *  self.heads, nonlinearity, no_bias=False, normalize_inputs=normalize_inputs, dropout = dropout) 
+        self.to_k = FeedForward(self.feat_dim, [32], self.dim_head *  self.heads, nonlinearity, no_bias=True, normalize_inputs=normalize_inputs, dropout = dropout) 
+        
+        self.to_out = FeedForward(self.heads *  self.heads, hidden_dims, 3, nonlinearity, no_bias=True, normalize_inputs=False, dropout = dropout)
+
+
+    def forward(self, feat_deformation, feat_strainRate, feat_spin, feat_rigidMotion, feat_force):
+
+        x = feat_rigidMotion[:,:,:,:7]
+
+        z = torch.cat([feat_deformation,
+                            feat_strainRate,
+                            feat_spin,
+                            ], dim=-1)
+        
+        if self.actuated:
+            z = torch.cat([z,
+                                feat_force[:,:,:,3:6]
+                                ], dim=-1)
+        
+        B, E, Q = x.shape[:-1] 
+
+        x = x.reshape(B*E*Q, self.condition_dim)                  # (B, E*Q, condition_dim)
+        z = z.reshape(B*E*Q, self.feat_dim)                       # (B, E*Q, feat_dim)
+
+        q = self.to_q(x)
+        q = q.reshape(B,E*Q,self.heads,self.dim_head) # (B,E*Q,heads,dim_head)
+
+        k = self.to_k(z)
+        k = k.reshape(B,E*Q,self.heads,self.dim_head) # (B,E*Q,heads,dim_head)
+
+        dots = torch.matmul(q, k.transpose(-1, -2)) # (B,E*Q,heads,heads)
+
+        dots = self.nonlinearity(dots)  # (B,E*Q,heads,heads)
+
+        out_feat = dots.reshape(B, E*Q, self.heads * self.heads) # (B,E*Q,heads*heads)
+
+        out = self.to_out(out_feat) # (B,E*Q,3)
+
+        return out.view(B,E,Q,3)
+
+
+
+
+
 class ElementResidual(nn.Module):
-    def __init__(self, dof, elements, faces, mu, lam, rho, X_e, dx, hidden_size=128, num_hidden_layer=4, nonlinearity='elu', no_bias=True, actuated=False, gravity=True, scale=1, changing_boundary_indices=None):
+    def __init__(self, dof, elements, faces, mu, lam, rho, X_e, dx, hidden_size=128, num_hidden_layer=4, nonlinearity='elu', no_bias=True, actuated=False, gravity=True, scale=1, changing_boundary_indices=None, normalize_inputs=True):
         super().__init__()
         
         self.dof = dof                                      # num_vertices * 3
         self.register_buffer('elements', elements.long())   # element vertex index mapping  
-        self.register_buffer('faces', faces.long())   # element vertex index mapping  
+        self.register_buffer('faces', faces.long())         # element vertex index mapping  
         self.register_buffer('mu', mu)                      # material Lame parameter mu
         self.register_buffer('lam', lam)                    # material Lame parameter lambda
         self.register_buffer('rho', rho)                    # material density
@@ -146,10 +285,18 @@ class ElementResidual(nn.Module):
                 self.register_buffer('g', torch.tensor([0, 0, 0], dtype=torch.float64))
 
         # features -> acceleration density
-        self.unmodelled_nn = Unmodelled_Acceleration(actuated=self.actuated, 
+        # self.unmodelled_nn = Unmodelled_Acceleration(actuated=self.actuated, 
+        #                                                 hidden_dims=num_hidden_layer*[hidden_size],
+        #                                                 nonlinearity=nonlinearity,
+        #                                                 no_bias=no_bias)   
+
+        self.unmodelled_nn = Unmodelled_Acceleration_Separated(actuated=self.actuated, 
+                                                        dim_head = 8,
+                                                        heads = 8,
                                                         hidden_dims=num_hidden_layer*[hidden_size],
                                                         nonlinearity=nonlinearity,
-                                                        no_bias=no_bias)   
+                                                        normalize_inputs=normalize_inputs,
+                                                        dropout = None)   
 
         self.changing_boundary_indices = changing_boundary_indices
 
@@ -410,11 +557,13 @@ class ElementResidual(nn.Module):
 
             mask =  forward & lateral_ok & facing & not_self #(F,F)
 
+            # assert(torch.all(mask.sum(dim=-1) == 1))
+
             valid_face2face_dist = torch.where(mask, face2face_dist, torch.full_like(face2face_dist, float("inf"))) #(F,F)
 
             max_depth_per_face = valid_face2face_dist.min(dim=-1)[0] #(F)
             self.register_buffer('max_depth', max_depth_per_face)
-            assert(torch.all(max_depth_per_face.isfinite()))
+            # assert(torch.all(max_depth_per_face.isfinite()))
 
             element_to_face_diff = face_positions.reshape(1,F,3) - element_positions.reshape(E*Q,1,3)   # (E*Q,F,3)
             alignment = torch.sum(n_f.reshape(1,F,3) * element_to_face_diff, dim=-1) # (E*Q,F)
@@ -426,7 +575,12 @@ class ElementResidual(nn.Module):
 
             element_to_face_lateral_ok = element_to_face_offsetPerp <= torch.sqrt(A_f).reshape(1,F) / 2 
 
-            dists = torch.where(alignment_ok & element_to_face_lateral_ok, element_depth_per_face, float('inf')) # (E*Q,F)
+            element_mask = alignment_ok & element_to_face_lateral_ok
+
+            # assert(torch.all(element_mask.sum(dim=-1) == 6))
+
+            # exit()
+            dists = torch.where(element_mask, element_depth_per_face, float('inf')) # (E*Q,F)
             _, min_dist_face_idx = torch.topk(dists, largest=False, k =k, dim=1)        # (E*Q,k)                        
             idx = min_dist_face_idx.reshape(E*Q*k,1)                     # (E*Q*k,3)
 
@@ -895,6 +1049,8 @@ class ElementResidual(nn.Module):
         volume = self.element_sample_volume.unsqueeze(0)                            # (B,E,Q,1)
         m = rho * volume                                                            # (B,E,Q,1)
 
+        M = m.sum(dim=[1,2], keepdim=True)
+
         q_rel, v_e, v_rel, v_rad, v_perp, sL_rel, q_cm, v_cm, Omega_cm = self.element_geom(q, v, m)  # (B,E,Q,3)
 
         q_rel_c = torch.einsum('beqij,beqj->beqi', Rt, q_rel)                       # (B,E,Q,3)
@@ -909,7 +1065,7 @@ class ElementResidual(nn.Module):
 
         q_rel_mag = q_rel.norm(dim=-1, keepdim=True)                                # (B,E,Q,1)
         v_e_mag = v_e.norm(dim=-1, keepdim=True)                                # (B,E,Q,1)
-        v_rel_mag = v_rel.norm(dim=-1, keepdim=True)                                # (B,E,Q,1)
+        v_rel_mag = v_rel.norm(dim=-1, keepdim=True)                              # (B,E,Q,1)
         v_cm_mag  = v_cm.norm(dim=-1, keepdim=True)                                 # (B,E,Q,1)
         Omega_cm_mag = Omega_cm.norm(dim=-1, keepdim=True)
         
@@ -942,16 +1098,26 @@ class ElementResidual(nn.Module):
                                     orig_norm_offset2face,
                                     v_cm_c,
                                     v_cm_mag,
+                                    v_rel_c,
+                                    v_rel_mag,
+                                    # v_e_c,
+                                    # v_e_mag,
+                                    # Omega_cm_c,
+                                    # Omega_cm_mag
                                 ], dim=-1)                                          # (B,E,Q,11)
 
         if self.actuated:
             f_e, t_e, f_total = self.force_geom(q, f, m, q_cm)             # (B,E,Q,3)
             
             f_e_c = torch.einsum('beqij,beqj->beqi', Rt, f_e)                       # (B,E,Q,3)
-            
+
+            a_e_c = f_e_c / m
+
             # 3-dim features (co-rotated frame): 
             feat_force = torch.cat([
-                                f_e_c,                                              # Effective external force per element (3)
+                                f_e_c,                                              # Effective acceleration due to external force per element (3)
+                                a_e_c,
+                                m
                                 ], dim=-1)                                          # (B,E,Q,3)
         else:
             feat_force = None

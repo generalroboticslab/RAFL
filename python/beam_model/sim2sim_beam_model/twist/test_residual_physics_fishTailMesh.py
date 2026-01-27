@@ -74,7 +74,8 @@ def test_trajectory(
                                             0.003,
                                             hidden_size=training_options['hidden_size'],
                                             num_hidden_layer=training_options['num_hidden_layer'],
-                                            actuated=training_options['actuated']
+                                            actuated=training_options['actuated'],
+                                            normalize_inputs=training_options['normalize_inputs'] if 'normalize_inputs' in training_options else True
                                             )
     elif training_options['model'] == 'element_old':
         g = training_options['state_force_parameters']
@@ -329,7 +330,7 @@ if __name__ == "__main__":
         'refinement': 1,
     }
 
-    save_folder = "training/test_refactor_element_zero_3"
+    save_folder = "training/test_refactor_element_zero_transformer_direct"
     os.makedirs(f"{save_folder}/fishTailMesh/", exist_ok=True)
     os.makedirs(f"{save_folder}/fishTailMesh/visualizations", exist_ok=True)
     os.makedirs(f"{save_folder}/fishTailMesh/visualizations/residual", exist_ok=True)

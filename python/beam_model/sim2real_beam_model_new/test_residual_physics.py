@@ -133,7 +133,7 @@ def test_trajectory(
     residual_network.eval()
 
     ground_truth = np.load(
-        f"cantilever_data_fix_registration/optimized_data_{test_data_idx}.npy",
+        f"cantilever_data_straight/optimized_data_{test_data_idx}.npy",
         allow_pickle=True,
     )[()]
     f_optimized = torch.from_numpy(ground_truth["optimized_forces"]).t()[1:]
@@ -142,7 +142,7 @@ def test_trajectory(
     training_set = CantileverDataset(
     training_options["training_set"],
     cantilever._q0,
-    f"cantilever_data_fix_registration",
+    f"cantilever_data_straight",
     start_frame=training_options["start_frame"],
     end_frame=training_options["end_frame"],
     )
@@ -173,7 +173,7 @@ def test_trajectory(
     predicted_residual_force_norms = []
     ground_truth_residual_force_norms = []
     normalize = training_options["normalize"]
-    cantilever.vis_dynamic_sim2real_markers(f"res_{test_data_idx}", q_res.detach().numpy(), cantilever.get_markers_3d(q_res.reshape(-1,3)).detach().numpy(), transformed_markers[0], frame=0)
+    cantilever.vis_dynamic_sim2real_markers(f"{save_folder.replace('training/', '')}/res_{test_data_idx}", q_res.detach().numpy(), cantilever.get_markers_3d(q_res.reshape(-1,3)).detach().numpy(), transformed_markers[0], frame=0)
     time_sim = 0
     time_res = 0
     time_origin = 0
@@ -184,6 +184,13 @@ def test_trajectory(
     #f_mean, f_std = torch.zeros(training_set.q_init.shape[0]).flatten(), torch.mean(torch.abs(training_set.fs.view(-1,3)), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
     # print(f_std[:3])
     # exit()
+
+    test_input = torch.cat([q_init, v0])
+
+    test_output = residual_network(test_input)
+
+    print(torch.mean(torch.abs(training_set.fs.view(-1,3)), dim=0))
+    print(torch.abs(test_output.reshape(-1,3)).mean(dim=0))
 
     #print(residual_network.unmodelled_nn(torch.zeros(13, dtype=torch.float64), torch.zeros(14, dtype=torch.float64), torch.zeros(4, dtype=torch.float64), torch.zeros(11, dtype=torch.float64), torch.zeros(3, dtype=torch.float64)))
     for frame_i in range(1, end_frame):
@@ -229,6 +236,8 @@ def test_trajectory(
         ground_truth_residual_force_norms.append(
             torch.norm(f_optimized[frame_i - 1, :]).item()
         )
+
+        # res_force = f_optimized[frame_i - 1, :]
         try:
             t0 = time.time()
             q_res, v_res = cantilever.forward(
@@ -341,36 +350,9 @@ def test_trajectory(
     return sim_markers_error, res_markers_error, time_sim, time_res, time_network, origin_markers_error, time_origin
 
 if __name__ == "__main__":
-    youngs_modulus = 215856
-    poissons_ratio = 0.45
-    density = 1.07e3
-    state_force = [0, 0, -9.80709]
-    hex_params = {
-        'density': density,
-        'youngs_modulus': youngs_modulus,
-        'poissons_ratio': poissons_ratio,
-        'state_force_parameters': state_force,
-        'mesh_type': 'hex',
-        'refinement': 1,
-    }
+
     weights = [0.05, 0.06, 0.07, 0.1, 0.09, 0.08, 0.11, 0.12, 0.15, 0.09, 0.13, 0.14, 0.16, 0.17, 0.2,0.18,0.22,0.21]
 
-    cantilever = CantileverEnv3d(42, 'beam', hex_params)
-    hex_params['youngs_modulus'] = 810695.1
-    hex_params['poissons_ratio'] = 0.499
-    cantilever_sim = CantileverEnv3d(42, 'beam', hex_params)
-    q_init = torch.from_numpy(cantilever._q0)
-    q0 = torch.from_numpy(cantilever._q0)
-    q_ = q0.reshape(-1, 3)
-    v0 = torch.zeros(q0.shape, dtype=torch.float64)
-
-    qs_real_ = np.load("weight_data_ordered/q_data_reorder.npz")
-
-    steady_state = qs_real_[f'arr_0'][:, :, -1] * 1e-3
-    R, t = cantilever.fit_realframe(steady_state)
-    steady_state_transformed = steady_state @ R.T + t
-
-    cantilever.interpolate_markers_3d(q_.detach().numpy(), steady_state_transformed)
 
     save_folder = f"training/test_refactor_element_zero_transformer_direct"
     sim_errors = []
@@ -380,14 +362,54 @@ if __name__ == "__main__":
     time_res_total = 0
     time_origin_total = 0
     time_network_total = 0
-    os.makedirs(f"{cantilever._folder}/{save_folder.replace('training/', '')}", exist_ok=True)
-    os.makedirs(f"{cantilever._folder}/{save_folder.replace('training/', '')}", exist_ok=True)
-    for test_i in [2,7,11,14,16]:
+    os.makedirs(f"beam/{save_folder.replace('training/', '')}", exist_ok=True)
+    os.makedirs(f"beam/{save_folder.replace('training/', '')}", exist_ok=True)
+    for test_i in [2,7,11,14,16]: 
+
+        youngs_modulus = 215856
+        poissons_ratio = 0.45
+        density = 1.07e3
+        state_force = [0, 0, -9.80709]
+        hex_params = {
+            'density': density,
+            'youngs_modulus': youngs_modulus,
+            'poissons_ratio': poissons_ratio,
+            'state_force_parameters': state_force,
+            'mesh_type': 'hex',
+            'refinement': 1,
+        }
+
+        cantilever = CantileverEnv3d(42, 'beam', hex_params)
+        hex_params['youngs_modulus'] = 240619.6  #810695.1
+        hex_params['poissons_ratio'] = 0.4951 #0.499
+        cantilever_sim = CantileverEnv3d(42, 'beam', hex_params)
+        q_init = torch.from_numpy(cantilever._q0)
+        q0 = torch.from_numpy(cantilever._q0)
+        q_ = q0.reshape(-1, 3)
+        v0 = torch.zeros(q0.shape, dtype=torch.float64)
+
+        # qs_real_ = np.load("weight_data_ordered/q_data_reorder.npz")
+        # steady_state = qs_real_[f'arr_0'][:, :, -1] * 1e-3
+        
+        qs_real = np.load(f"data/q{test_i}.npy")
+        steady_state = qs_real[0] * 1e-3
+        
+        R, t = cantilever.fit_realframe(steady_state)
+        # print(R,t)
+
+        # R = np.eye(3)
+        # t = np.zeros(3)
+        steady_state_transformed = steady_state @ R.T + t
+
+        cantilever.interpolate_markers_3d(q_.detach().numpy(), steady_state_transformed)
+
+
         print(f"test id {test_i}")
-        real_markers = np.load(f"weight_data_ordered/qs_real{test_i}_reorder.npy") * 1e-3
-        transformed_markers = np.zeros((150, 10,3))
+        #real_markers = np.load(f"weight_data_ordered/qs_real{test_i}_reorder.npy") * 1e-3
+        real_markers = qs_real[1:,:,:] * 1e-3
+        transformed_markers = np.zeros((150, 32,3))
         for i in range(150):
-            transformed_markers[i] = real_markers[:, :, i] @ R.T + t
+            transformed_markers[i] = real_markers[i, :, :] @ R.T + t
         sim_error, res_error, time_sim, time_res, time_network, origin_error, time_origin = test_trajectory(
             cantilever, save_folder, test_i, transformed_markers, end_frame=140, cantilever_sim=cantilever_sim
         )

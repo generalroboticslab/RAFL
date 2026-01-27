@@ -16,8 +16,9 @@ from residual_physics.network import ResMLPResidual2, MLPResidual
 from residual_physics.element_force_update import ElementResidual
 from py_diff_pd.common.common import ndarray
 from tqdm import tqdm
+from py_diff_pd.common.hex_mesh import get_boundary_face
 
-def fine_tune(
+def train(
     cantilever:CantileverEnv3d, save_folder, start_frame=0, end_frame=150, num_epochs=100, cantilever_sim=None
 ):
 
@@ -55,6 +56,7 @@ def fine_tune(
             lam.append(la)
             rho.append(cantilever._deformable.density())
         
+        surface_faces = get_boundary_face(mesh)
         elements = ndarray(elements)
         mu = ndarray(mu)
         lam = ndarray(lam)
@@ -62,6 +64,7 @@ def fine_tune(
 
         residual_network = ElementResidual(cantilever._dofs, 
                                             torch.tensor(elements), 
+                                            torch.tensor(surface_faces),
                                             torch.tensor(mu), 
                                             torch.tensor(lam), 
                                             torch.tensor(rho),
@@ -69,7 +72,8 @@ def fine_tune(
                                             0.01,
                                             hidden_size=training_options['hidden_size'],
                                             num_hidden_layer=training_options['num_hidden_layer'],
-                                            actuated=training_options['actuated']
+                                            actuated=training_options['actuated'],
+                                            normalize_inputs=training_options['normalize_inputs']
                                             )
 
     model_input = f"residual_network"
@@ -119,7 +123,7 @@ def fine_tune(
 
     normalize = training_options["normalize"]
     #f_mean, f_std = torch.mean(training_set.fs.view(-1,3), dim=0).expand(dofs // 3, 3).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(dofs // 3, 3).flatten()
-    #f_mean, f_std = torch.zeros(training_set.q_init.shape[0]).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
+    f_mean, f_std = torch.zeros(training_set.q_init.shape[0]).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
     
     decay_rate_cycle = np.linspace(0.91, 1.0, 10)
     
@@ -138,26 +142,37 @@ def fine_tune(
                 total_loss = []
 
                 for frame_i in range(1, end_frame):
-                    if epoch < 10:
-                        q = target_trajectory_q[frame_i - 1].detach().clone()
-                        v = target_trajectory_v[frame_i - 1].detach().clone()
+                    # if epoch < 10:
+                    #     q = target_trajectory_q[frame_i - 1].detach().clone()
+                    #     v = target_trajectory_v[frame_i - 1].detach().clone()
                     try:
                         if normalize:
-                            (
-                                q_res_normalized,
-                                v_res_normalized,
-                            ) = training_set.normalize(q=q - q_init, v=v)
-                            res_force_normalized = residual_network(
-                                torch.cat(
-                                    (q_res_normalized, v_res_normalized),
-                                    dim=0,
-                                ).expand(1, -1).to(device)
-                            )[0]
-                            res_force = training_set.denormalize(f=res_force_normalized.cpu())[0]
+                            if 'element' in training_options['model']:
+                                res_force_normalized = residual_network(
+                                    torch.cat((q, v), dim=0).to(device)
+                                )[0]
+                                res_force = training_set.denormalize(f=res_force_normalized.cpu(), normalization_params=(None, None, None, None, f_mean, f_std))[0]
+                            else:
+                                (
+                                    q_res_normalized,
+                                    v_res_normalized,
+                                ) = training_set.normalize(q=q - q_init, v=v)
+                                res_force_normalized = residual_network(
+                                    torch.cat(
+                                        (q_res_normalized, v_res_normalized),
+                                        dim=0,
+                                    ).expand(1, -1).to(device)
+                                )[0]
+                                res_force = training_set.denormalize(f=res_force_normalized.cpu())[0]
                         else:
-                            res_force_normalized = residual_network(
-                                torch.cat((q, v), dim=0).to(device)
-                            )[0]
+                            if 'element' in training_options['model']:
+                                res_force_normalized = residual_network(
+                                    torch.cat((q, v), dim=0).to(device)
+                                )[0]
+                            else:
+                                res_force_normalized = residual_network(
+                                    torch.cat((q - q_init, v), dim=0).expand(1, -1).to(device)
+                                )[0]
                             # res_force = training_set.denormalize(f=res_force_normalized.cpu(), normalization_params=(None, None, None, None, f_mean, f_std))[0]
                             res_force = res_force_normalized.cpu()
 
@@ -165,13 +180,18 @@ def fine_tune(
                         data_loss = ((target_trajectory_q[frame_i] - q)**2).sum()
                         loss = data_loss 
                         total_loss.append(loss)
-                    except:
+                    except Exception as e:
+                        # Get the exception type name and message
+                        exception_type = type(e).__name__
+                        exception_message = str(e)
+                        print(f"An error of type '{exception_type}' occurred: {exception_message}")
+                        # Output: An error of type 'NameError' occurred: name 'x' is not defined
                         print("Failed full trajectory")
                         break
 
                 # total_loss = (torch.pow(decay_rate_cycle[epoch % 10], torch.arange(len(total_loss))) * torch.stack(total_loss)).mean() 
 
-                total_loss = 1e3 * torch.stack(total_loss).mean() 
+                total_loss = training_options["scale"] * torch.stack(total_loss).mean() 
                 total_loss.backward()
                 optimizer.step()
                 train_loss += total_loss.item() 
@@ -196,21 +216,32 @@ def fine_tune(
                         try:
 
                             if normalize:
-                                (
-                                    q_res_normalized,
-                                    v_res_normalized,
-                                ) = training_set.normalize(q=q - q_init, v=v)
-                                res_force_normalized = residual_network(
-                                    torch.cat(
-                                        (q_res_normalized, v_res_normalized),
-                                        dim=0,
-                                    ).expand(1, -1).to(device)
-                                )[0]
-                                res_force = training_set.denormalize(f=res_force_normalized.cpu())[0]
+                                if 'element' in training_options['model']:
+                                    res_force_normalized = residual_network(
+                                        torch.cat((q, v), dim=0).to(device)
+                                    )[0]
+                                    res_force = training_set.denormalize(f=res_force_normalized.cpu(), normalization_params=(None, None, None, None, f_mean, f_std))[0]
+                                else:
+                                    (
+                                        q_res_normalized,
+                                        v_res_normalized,
+                                    ) = training_set.normalize(q=q - q_init, v=v)
+                                    res_force_normalized = residual_network(
+                                        torch.cat(
+                                            (q_res_normalized, v_res_normalized),
+                                            dim=0,
+                                        ).expand(1, -1).to(device)
+                                    )[0]
+                                    res_force = training_set.denormalize(f=res_force_normalized.cpu())[0]
                             else:
-                                res_force_normalized = residual_network(
-                                    torch.cat((q, v), dim=0).to(device)
-                                )[0]
+                                if 'element' in training_options['model']:
+                                    res_force_normalized = residual_network(
+                                        torch.cat((q, v), dim=0).to(device)
+                                    )[0]
+                                else:
+                                    res_force_normalized = residual_network(
+                                        torch.cat((q - q_init, v), dim=0).expand(1, -1).to(device)
+                                    )[0]
                                 # res_force = training_set.denormalize(f=res_force_normalized.cpu(), normalization_params=(None, None, None, None, f_mean, f_std))[0]
                                 res_force = res_force_normalized.cpu()
                             q, v = cantilever.forward(q, v, f_ext=res_force, dt=0.01)
@@ -218,6 +249,7 @@ def fine_tune(
                             loss = data_loss 
                             total_loss.append(loss)
                         except:
+                            print("Failed")
                             break
 
                     total_loss = torch.stack(total_loss).mean() 
@@ -259,18 +291,18 @@ if __name__ == "__main__":
     config["cuda"] = 1
     config["normalize"] = False 
     config["Inialization"] = 1e-3
-    config["scale"] = 1#e6
+    config["scale"] = 1 #e3#e6
     config["data_type"] = "optimized"
     config["weight_decay"] = 1e-5
     config["fit"] = "forces"
     # config["fit"] = "SITL"
-    config["model"] = "element"
-    # config["model"] = "skip_connection"
+    # config["model"] = "element"
+    config["model"] = "skip_connection"
     config["num_mlp_blocks"] = 5
-    config["hidden_size"] = 64
-    config["num_hidden_layer"] = 4
+    config["hidden_size"] = 512
+    config["num_hidden_layer"] = 3
     config["actuated"] = True
-
+    config["normalize_inputs"] = False
     youngs_modulus = 215856
     poissons_ratio = 0.45
     density = 1.07e3
@@ -286,7 +318,7 @@ if __name__ == "__main__":
     cantilever = CantileverEnv3d(42, 'beam', hex_params)
     q_init = torch.from_numpy(cantilever._q0)
 
-    save_folder = f"training/test_refactor_element_zero_direct_traj"
+    save_folder = f"training/test_refactor_direct"
     os.makedirs(f"{save_folder}", exist_ok=True)
 
     config["data_folder"] = save_folder.replace("training/", "")
@@ -295,6 +327,6 @@ if __name__ == "__main__":
         yaml.dump(hex_params, f)
         yaml.dump(config, f)
 
-    fine_tune(
+    train(
         cantilever, save_folder, end_frame=150, cantilever_sim=cantilever
     )

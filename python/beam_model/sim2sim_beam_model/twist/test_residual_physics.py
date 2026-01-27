@@ -85,6 +85,7 @@ def test_trajectory(
                                             hidden_size=training_options['hidden_size'],
                                             num_hidden_layer=training_options['num_hidden_layer'],
                                             actuated=training_options['actuated'],
+                                            normalize_inputs=training_options['normalize_inputs'] if 'normalize_inputs' in training_options else True
                                             )
     elif training_options['model'] == 'element_old':
         g = training_options['state_force_parameters']
@@ -222,9 +223,14 @@ def test_trajectory(
                 )[0]
                 res_force = training_set.denormalize(f=res_force_normalized)[0]
         else:
-            res_force_normalized = residual_network(
-                torch.cat((q_res, v_res), dim=0)
-            )[0]
+            if 'element' in training_options['model']:
+                res_force_normalized = residual_network(
+                    torch.cat((q_res, v_res), dim=0)
+                )[0]
+            else:
+                res_force_normalized = residual_network(
+                    torch.cat((q_res - q_init, v_res), dim=0).expand(1, -1)
+                )[0]
             res_force = res_force_normalized
         #print(res_force.norm())
         #print(f_optimized[frame_i - 1, :].norm())
@@ -347,7 +353,7 @@ if __name__ == "__main__":
         'refinement': 1,
     }
 
-    save_folder = "training/test_refactor_element_zero_3_vibrate"
+    save_folder = "training/test_refactor_element_zero_transformer_direct"
     cantilever = CantileverEnv3d(42, save_folder, hex_params)
 
     os.makedirs(f"{save_folder}/visualizations", exist_ok=True)

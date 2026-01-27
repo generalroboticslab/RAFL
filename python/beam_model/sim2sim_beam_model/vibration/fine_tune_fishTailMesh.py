@@ -14,7 +14,7 @@ from _visualization import plot_trajectory, plot_forces_norm
 from env_cantilever import CantileverEnv3d
 from env_fishTailMesh import FishTailMeshEnv3d
 from residual_physics.network import ResMLPResidual2, MLPResidual
-from residual_physics.element_force_update import ElementResidual
+from residual_physics.element_force_update import ElementResidual, VarNorm1d
 from py_diff_pd.common.common import ndarray
 from tqdm import tqdm
 from py_diff_pd.common.hex_mesh import get_boundary_face
@@ -73,7 +73,8 @@ def fine_tune(
                                             0.003,
                                             hidden_size=training_options['hidden_size'],
                                             num_hidden_layer=training_options['num_hidden_layer'],
-                                            actuated=training_options['actuated']
+                                            actuated=training_options['actuated'],
+                                            normalize_inputs=training_options['normalize_inputs'] if 'normalize_inputs' in training_options else True
                                             )
 
     model_input = f"residual_network"
@@ -102,6 +103,9 @@ def fine_tune(
             m.weight.requires_grad_(False)
             m.bias.requires_grad_(False)
             m.eval() # This freezes running_mean and running_var
+        if isinstance(m, VarNorm1d):
+            m.weight.requires_grad_(False)
+            m.eval()
 
     training_set = CantileverDataset(
     training_options["training_set"],
@@ -115,7 +119,7 @@ def fine_tune(
 
     optimizer = torch.optim.Adam(
             trainable_params,
-            lr=0.1 * training_options["learning_rate"],
+            lr=training_options["learning_rate"],
             weight_decay=training_options["weight_decay"],
         )
 
@@ -168,7 +172,7 @@ def fine_tune(
                     loss = data_loss 
                     total_loss.append(loss)
 
-                total_loss = torch.stack(total_loss).mean() 
+                total_loss = training_options['scale'] * torch.stack(total_loss).mean() 
                 total_loss.backward()
                 optimizer.step()
                 train_loss += total_loss.item() 
@@ -257,7 +261,7 @@ if __name__ == "__main__":
     default_cantilever = CantileverEnv3d(42, 'beam', hex_params)
     q_init = torch.from_numpy(cantilever._q0)
 
-    save_folder = f"training/test_refactor_element_zero_3"
+    save_folder = f"training/test_refactor_element_zero_transformer_direct"
     os.makedirs(f"{save_folder}/fishTailMesh_finetune/", exist_ok=True)
     fine_tune(
         cantilever, save_folder, end_frame=150, cantilever_sim=cantilever, default_cantilever=default_cantilever

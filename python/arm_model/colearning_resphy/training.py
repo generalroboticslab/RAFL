@@ -39,7 +39,7 @@ if __name__ == "__main__":
         config["cuda"] = 1
         config["normalize"] = False 
         config["Inialization"] = 1e-3
-        config["scale"] = 1#e6
+        config["scale"] = 1e3 #e6
         config["data_type"] = "optimized"
         config["weight_decay"] = 1e-5
         # config["validate_physics"] = True
@@ -51,12 +51,12 @@ if __name__ == "__main__":
         config["model"] = "element"
         config["tolerance"] = 121
         config["num_mlp_blocks"] = 5
-        config["hidden_size"] = 256
+        config["hidden_size"] = 64
         config["num_hidden_layer"] = 4
         config["actuated"] = True
 
         # save_folder = f"training/test_refactor"
-        save_folder = f"training/test_refactor_element"
+        save_folder = f"training/test_refactor_element_transformer"
         config["data_folder"] = save_folder.replace("training/", "")
         sopra_residual = SoPrAResidualPhysics(config, save_folder, params)
         torch.manual_seed(config["seed"])

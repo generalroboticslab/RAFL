@@ -20,7 +20,7 @@ from tqdm import tqdm
 from py_diff_pd.common.hex_mesh import get_boundary_face
 
 def train(
-    cantilever:CantileverEnv3d, save_folder, start_frame=0, end_frame=150, num_epochs=300, cantilever_sim=None, 
+    cantilever:CantileverEnv3d, save_folder, start_frame=0, end_frame=150, num_epochs=100, cantilever_sim=None, 
 ):
 
     if cantilever_sim is None:
@@ -74,7 +74,10 @@ def train(
                                             hidden_size=training_options['hidden_size'],
                                             num_hidden_layer=training_options['num_hidden_layer'],
                                             actuated=training_options['actuated'],
-                                            normalize_inputs=training_options['normalize_inputs']
+                                            normalize_inputs=training_options['normalize_inputs'],
+                                            separated=training_options['separated'] if 'separated' in training_options else True,
+                                            conditioned=training_options['conditioned'] if 'conditioned' in training_options else True,
+                                            stress=training_options['stress'] if 'stress' in training_options else False
                                             )
 
     model_input = f"residual_network"
@@ -147,7 +150,6 @@ def train(
                                     torch.cat((q, v), dim=0).to(device)
                                 )[0]
                             else:
-                                input_qv = torch.cat((q - q_init, v), dim=0).to(device)
                                 res_force_normalized = residual_network(
                                     torch.cat((q - q_init, v), dim=0).expand(1, -1).to(device)
                                 )[0]
@@ -155,7 +157,7 @@ def train(
 
                         q, v = cantilever.forward(q, v, f_ext=res_force, dt=0.01)
                         data_loss = ((target_trajectory_q[frame_i] - q)**2).sum()
-                        loss = data_loss 
+                        loss = data_loss + 1e-4 * (res_force**2).sum()
                         total_loss.append(loss)
                     except Exception as e:
                         # Get the exception type name and message
@@ -282,7 +284,9 @@ if __name__ == "__main__":
     config["num_hidden_layer"] = 4
     config["actuated"] = True
     config["normalize_inputs"] = False
-
+    config["separated"] = False
+    config["conditioned"] = False
+    config["stress"] = False
 
     youngs_modulus = 215856
     poissons_ratio = 0.45
@@ -299,7 +303,7 @@ if __name__ == "__main__":
     cantilever = CantileverEnv3d(42, 'beam', hex_params)
     q_init = torch.from_numpy(cantilever._q0)
 
-    save_folder = f"training/test_refactor_element_zero_transformer_direct_longer"
+    save_folder = f"training/test_refactor_direct_element_nonWeighted_try_unseparated_unconditioned_noSpin_direct"
     os.makedirs(f"{save_folder}", exist_ok=True)
     
     config["data_folder"] = save_folder.replace("training/", "")

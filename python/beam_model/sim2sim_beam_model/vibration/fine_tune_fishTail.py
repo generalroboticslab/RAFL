@@ -74,7 +74,9 @@ def fine_tune(
                                             hidden_size=training_options['hidden_size'],
                                             num_hidden_layer=training_options['num_hidden_layer'],
                                             actuated=training_options['actuated'],
-                                            normalize_inputs=training_options['normalize_inputs'] if 'normalize_inputs' in training_options else True
+                                            normalize_inputs=training_options['normalize_inputs'] if 'normalize_inputs' in training_options else True,
+                                            separated=training_options['separated'] if 'separated' in training_options else True,
+                                            conditioned=training_options['conditioned'] if 'conditioned' in training_options else True
                                             )
 
     model_input = f"residual_network"
@@ -262,7 +264,7 @@ if __name__ == "__main__":
     default_cantilever = CantileverEnv3d(42, 'beam', hex_params)
     q_init = torch.from_numpy(cantilever._q0)
 
-    save_folder = f"training/test_refactor_element_zero_transformer_direct" #_real"
+    save_folder = f"training/test_refactor_element_nonWeighted_try_unseparated_unconditioned_direct"
     os.makedirs(f"{save_folder}/fishTail_finetune/", exist_ok=True)
     fine_tune(
         cantilever, save_folder, end_frame=150, cantilever_sim=cantilever, default_cantilever=default_cantilever

@@ -9,13 +9,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import argparse
-
+from tqdm import tqdm
 from markermatch import init_realdata, init_simenv
 from _utils import ArmDataset
 from residual_physics.network import MLPResidual, ResMLPResidual2
-from residual_physics.element_force import ElementResidual
+from residual_physics.element_force_update import ElementResidual
 from py_diff_pd.common.common import ndarray
-
+from py_diff_pd.common.tet_mesh import get_boundary_face
 
 def test_trajectory(
     sopra_env, save_folder, test_data_idx, transformed_markers, real_p, fitting_options,  start_frame=0, end_frame=999, sopra_env_sim=None
@@ -49,27 +49,38 @@ def test_trajectory(
             lam.append(la)
             rho.append(sopra_env._deformable.density())
         
+        surface_faces = sopra_env._get_boundary_ordered()
         elements = ndarray(elements)
         mu = ndarray(mu)
         lam = ndarray(lam)
         rho = ndarray(rho)
+        
+        inner_faces = np.concatenate(sopra_env._inner_faces)
+        force_nodes = []
+        for face in inner_faces:
+            force_nodes.extend(face)
+
+        force_nodes = np.array(list(set(force_nodes)))
+
 
         residual_network = ElementResidual(sopra_env._dofs, 
-                                            torch.tensor(elements), 
-                                            torch.tensor(mu), 
-                                            torch.tensor(lam), 
-                                            torch.tensor(rho),
-                                            torch.tensor(sopra_env._q0), 
-                                            None,
-                                            hidden_size=training_options['hidden_size'],
-                                            num_hidden_layer=training_options['num_hidden_layer'],
-                                            actuated=training_options['actuated']
-                                            )
+                                                torch.tensor(elements), 
+                                                torch.tensor(surface_faces),
+                                                torch.tensor(mu), 
+                                                torch.tensor(lam), 
+                                                torch.tensor(rho), 
+                                                sopra_env._q0, 
+                                                None,
+                                                hidden_size=training_options['hidden_size'],
+                                                num_hidden_layer=training_options['num_hidden_layer'],
+                                                actuated=training_options['actuated'],
+                                                force_nodes=torch.tensor(force_nodes)
+                                                )
     model = torch.load(f"{save_folder}/residual_network.pth")
     model_input = f"residual_network"
-    print(model_input)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = torch.load(f"{save_folder}/{model_input}.pth", map_location=device)
+    # print(model_input)
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # model = torch.load(f"{save_folder}/{model_input}.pth", map_location=device)
 
     # create new OrderedDict that does not contain `module.`
     if 'module' in list(model['model'].keys())[0]:
@@ -121,7 +132,7 @@ def test_trajectory(
     normalize = training_options["normalize"]
     #f_mean, f_std = torch.mean(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
     f_mean, f_std = torch.zeros(training_set.q_init.shape[0]).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
-    for frame_i in range(1, end_frame):
+    for frame_i in tqdm(range(1, end_frame)):
         start_time = time.time()
         pressure = real_p[frame_i - 1]
         f_ext_sim = sopra_env_sim.apply_inner_pressure(
@@ -153,7 +164,8 @@ def test_trajectory(
             res_force_normalized = residual_network(
                 torch.cat((q_res, v_res, f_ext_res), dim=0)
             )[0]
-            res_force = training_set.denormalize(f=res_force_normalized, normalization_params=(None, None, None, None, None, None, f_mean, f_std))[0]
+            #res_force = training_set.denormalize(f=res_force_normalized, normalization_params=(None, None, None, None, None, None, f_mean, f_std))[0]
+            res_force = res_force_normalized
             res_force_error = torch.norm(res_force - f_optimized[frame_i - 1, :])
         predicted_residual_force_norms.append(torch.norm(res_force).item())
         res_force_errors.append(res_force_error.item())
@@ -433,7 +445,7 @@ if __name__ == "__main__":
             for lr in lrs:
                 for step in steps:
                     for gamma in gammas:
-                        save_folder = f"training/test_refactor_element" #f"hyperparam_search/learning_rate_1.000E-03_numblocks_5_num_layers_3_hidden_size_512"
+                        save_folder = f"training/test_refactor_element_transformer" #f"hyperparam_search/learning_rate_1.000E-03_numblocks_5_num_layers_3_hidden_size_512"
                         sim_errors = []
                         res_errors = []
                         for i in range(180,200):

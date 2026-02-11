@@ -11,7 +11,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from pathlib import Path
 from _utils import CantileverDataset
-from env_cantilever import CantileverEnv3d
+from env_cantilever_new import CantileverEnv3d
 from model import SupervisedLearningForward, PhysicsForward, LearningFoward
 from residual_physics.residual_physics import ResidualPhysicsBase
 from residual_physics.network import ResMLPResidual2, MLPResidual
@@ -60,6 +60,8 @@ class CantileverResidualPhysics(ResidualPhysicsBase):
             lam = ndarray(lam)
             rho = ndarray(rho)
 
+            self.scaling = len(elements) * 8
+
             self.residual_network = UpdatedElementResidual(diffpd_model._dofs, 
                                                     torch.tensor(elements), 
                                                     torch.tensor(surface_faces), 
@@ -70,7 +72,10 @@ class CantileverResidualPhysics(ResidualPhysicsBase):
                                                     0.01,
                                                     hidden_size=config['hidden_size'],
                                                     num_hidden_layer=config['num_hidden_layer'],
-                                                    actuated=config['actuated']
+                                                    actuated=config['actuated'],
+                                                    normalize_inputs=config['normalize_inputs'] if 'normalize_inputs' in config else True,
+                                                    separated=config['separated'] if 'separated' in config else True,
+                                                    conditioned=config['conditioned'] if 'conditioned' in config else True,
                                                     )
         elif config["model"] == "element_old":
             self.model_type = 'element'

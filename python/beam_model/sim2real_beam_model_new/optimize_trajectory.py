@@ -16,7 +16,7 @@ from py_diff_pd.core.py_diff_pd_core import StdRealVector, HexMesh3d, HexDeforma
 from py_diff_pd.common.hex_mesh import generate_hex_mesh, voxelize, hex2obj
 from py_diff_pd.common.display import render_hex_mesh, export_gif, export_mp4
 
-from env_cantilever import CantileverEnv3d
+from env_cantilever_new import CantileverEnv3d
 
 def optimize_trajectoryfull(beam_folder, cantilever:CantileverEnv3d, num_frames, num_epochs, target_data, dt, sample=0, suffix = "fix_registration"):
     folder = 'trajectoryfull'

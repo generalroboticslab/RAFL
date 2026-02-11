@@ -8,7 +8,7 @@ import scipy
 import numpy as np
 import torch
 
-from env_cantilever import CantileverEnv3d
+from env_cantilever_new import CantileverEnv3d
 import matplotlib.pyplot as plt
 from _visualization import error_computation, plot_histogram
 ### Apply System Identification to the Beam Model
@@ -41,10 +41,13 @@ def system_identification ( trajectories, num_frames, dt, verbose=False, folder=
     method = 'pd_eigen'
     # opt = { 'max_pd_iter': 1000, 'max_ls_iter': 10, 'abs_tol': 1e-6, 'rel_tol': 1e-3, 'verbose': 0, 'thread_ct': 16, 'use_bfgs': 1, 'bfgs_history_size': 10 }
 
-    ### Start Optimization
+    # Start Optimization
     x_lb = np.array([np.log(1.5e5), 0.3])
     x_ub = np.array([np.log(1e7), 0.499])
     x_init = np.array([np.log(2e5), 0.4])    # 258321.2 # 263824
+    # x_lb = np.array([np.log(.5e5)]) #, 0.3])
+    # x_ub = np.array([np.log(1e7)]) #, 0.499])
+    # x_init = np.array([np.log(2e5)]) #, 0.4])    # 258321.2 # 263824
     x_bounds = scipy.optimize.Bounds(x_lb, x_ub)
 
     ### Only optimize for Young's Modulus
@@ -61,6 +64,7 @@ def system_identification ( trajectories, num_frames, dt, verbose=False, folder=
         ### Initialize Environment
         E = np.exp(x[0])
         nu = x[1]
+        # nu = .499 #x[1]
         E_list.append(E)
         nu_list.append(nu)
         #print(E)
@@ -72,7 +76,7 @@ def system_identification ( trajectories, num_frames, dt, verbose=False, folder=
         total_loss = 0
         total_grad = 0
         for traj_i in trajectories:
-            qs_real = np.load(f'data/q{traj_i}.npy' )
+            qs_real = np.load(f'data_new/q{traj_i}.npy' )
             initial_real_marker = qs_real[0,:,:]*1e-3
             # initial_real_marker = initial_real_markers[f'arr_10'][:,:,830]*1e-3
             R, t = env.fit_realframe(initial_real_marker)
@@ -85,7 +89,7 @@ def system_identification ( trajectories, num_frames, dt, verbose=False, folder=
             env.qs_real_series = real_markers
             interpolated_marker = env.get_markers_3d(torch.from_numpy(env._q0.reshape(-1,3)))
             # env.vis_dynamic_sim2real_markers("vis_sysID_all", np.zeros_like(env._q0), torch.zeros_like(interpolated_marker), real_markers[-1])
-            data_info = np.load(f"cantilever_data_straight/optimized_data_{traj_i}.npy", allow_pickle=True)[()]
+            data_info = np.load(f"cantilever_data_new_straight/optimized_data_{traj_i}.npy", allow_pickle=True)[()]
             qs = data_info['q_trajectory']
             q0 = qs[0]
             v0 = np.zeros_like(q0)
@@ -210,7 +214,7 @@ def run_simulation (trajectories, youngs_modulus, poisson_ratio, dt=0.01, folder
     }
     env = CantileverEnv3d(seed, folder, env_params)
     env.method = 'pd_eigen'
-    env.opt = { 'max_pd_iter': 1000, 'max_ls_iter': 10, 'abs_tol': 1e-8, 'rel_tol': 1e-8, 'verbose': 0, 'thread_ct': 4, 'use_bfgs': 1, 'bfgs_history_size': 10 }
+    # env.opt = { 'max_pd_iter': 1000, 'max_ls_iter': 10, 'abs_tol': 1e-8, 'rel_tol': 1e-8, 'verbose': 0, 'thread_ct': 4, 'use_bfgs': 1, 'bfgs_history_size': 10 }
     print(f"DOFs: {env._dofs}")
 
 
@@ -218,7 +222,7 @@ def run_simulation (trajectories, youngs_modulus, poisson_ratio, dt=0.01, folder
     num_trajectories = len(trajectories)
     qs_sim = [[] for _ in range(num_trajectories)]
     for idx, traj_i in enumerate(trajectories):
-        data_info = np.load(f"cantilever_data_straight/optimized_data_{traj_i}.npy", allow_pickle=True)[()]
+        data_info = np.load(f"cantilever_data_new_straight/optimized_data_{traj_i}.npy", allow_pickle=True)[()]
         qs = data_info['q_trajectory']
         fixed_dt = 0.01 # Data collected at 100Hz
         start_time = time.time()
@@ -255,17 +259,18 @@ if __name__ == "__main__":
     test_trajectories = [2, 7, 11, 14, 16]
     #test_trajectories = trajectories
     num_frames = 140
-    folder = "SysID_beam_damping"
+    folder = "SysID_beam_both_new"
     os.makedirs(folder, exist_ok=True)
     ### Loading Real Data
     # print(steady_state)
     base_youngs_modulus = 200000
-    base_poisson_ratio = 0.4
+    base_poisson_ratio = 0.499
     base_damping_param = np.array([[0.0, 0.0, 0.0]])
     # opt_youngs_modulus = 6275138.3
     # opt_poisson_ratio = 0.49
     # opt_damping_param = np.array([[0.001, 0.001, -0.2]])
     opt_youngs_modulus, opt_poisson_ratio = system_identification(trajectories, num_frames, dt, verbose=True, folder=folder)
+    # opt_youngs_modulus, opt_poisson_ratio = 116260.6, 0.499
     print(f"Optimized Young's Modulus: {opt_youngs_modulus:.1f}")
     print(f"Optimized Poisson's Ratio: {opt_poisson_ratio:.4f}")
 
@@ -291,7 +296,7 @@ if __name__ == "__main__":
     real_markers_series = []
     for idx, traj_i in enumerate(test_trajectories):
 
-        qs_real = np.load(f'data/q{traj_i}.npy' )
+        qs_real = np.load(f'data_new/q{traj_i}.npy' )
 
         steady_state = qs_real[0,:,:] * 1e-3
         R, t = env.fit_realframe(steady_state)

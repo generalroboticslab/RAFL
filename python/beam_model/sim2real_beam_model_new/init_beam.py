@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from env_cantilever import CantileverEnv3d
+from env_cantilever_new import CantileverEnv3d
 
 
 def optimize_init_force(

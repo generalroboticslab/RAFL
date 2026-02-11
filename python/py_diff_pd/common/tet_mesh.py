@@ -138,7 +138,7 @@ def tet2obj_with_textures(tet_mesh, obj_file_name=None, pbrt_file_name=None):
 # Output:
 # - vertices: an n x 3 double array.
 # - faces: an m x 3 integer array.
-def tet2obj(tet_mesh, obj_file_name=None):
+def tet2obj(tet_mesh, obj_file_name=None, filter=True):
     vertex_num = tet_mesh.NumOfVertices()
     element_num = tet_mesh.NumOfElements()
 
@@ -168,7 +168,8 @@ def tet2obj(tet_mesh, obj_file_name=None):
         f.append(vidx)
     f = ndarray(f).astype(int)
 
-    v, f = filter_unused_vertices(v, f)
+    if filter:
+        v, f = filter_unused_vertices(v, f)
 
     if obj_file_name is not None:
         with open(obj_file_name, 'w') as f_obj:
@@ -180,8 +181,8 @@ def tet2obj(tet_mesh, obj_file_name=None):
     return v, f
 
 # Extract boundary faces from a 3D mesh.
-def get_boundary_face(tet_mesh):
-    _, f = tet2obj(tet_mesh)
+def get_boundary_face(tet_mesh, filter=True):
+    _, f = tet2obj(tet_mesh, filter=filter)
     return f
 
 # Input:

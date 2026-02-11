@@ -75,7 +75,10 @@ def test_trajectory(
                                             hidden_size=training_options['hidden_size'],
                                             num_hidden_layer=training_options['num_hidden_layer'],
                                             actuated=training_options['actuated'],
-                                            normalize_inputs=training_options['normalize_inputs'] if 'normalize_inputs' in training_options else True
+                                            normalize_inputs=training_options['normalize_inputs'] if 'normalize_inputs' in training_options else True,
+                                            separated=training_options['separated'] if 'separated' in training_options else True,
+                                            conditioned=training_options['conditioned'] if 'conditioned' in training_options else True,
+                                            stress=training_options['stress'] if 'stress' in training_options else False
                                             )
     elif training_options['model'] == 'element_old':
         g = training_options['state_force_parameters']
@@ -330,7 +333,7 @@ if __name__ == "__main__":
         'refinement': 1,
     }
 
-    save_folder = "training/test_refactor_element_zero_transformer_direct"
+    save_folder = "training/test_refactor_direct_element_nonWeighted_try_unseparated_unconditioned_noSpin_direct" #_stress_direct"
     os.makedirs(f"{save_folder}/fishTail/", exist_ok=True)
     os.makedirs(f"{save_folder}/fishTail/visualizations", exist_ok=True)
     os.makedirs(f"{save_folder}/fishTail/visualizations/residual", exist_ok=True)
@@ -362,6 +365,6 @@ if __name__ == "__main__":
     np.save(f"{save_folder}/fishTail/res_errors_residual_network.npy", sim_errors)
     np.save(f"{save_folder}/fishTail/res_errors_residual_network.npy", res_errors)
 
-    # generate_video_directory(f"{save_folder}/fishTail/visualizations/residual", list(range(12,20)), flag="")
-    # generate_video_directory(f"{save_folder}/fishTail/visualizations/base", list(range(12,20)), flag="")
+    generate_video_directory(f"{save_folder}/fishTail/visualizations/residual", list(range(12,20)), flag="")
+    generate_video_directory(f"{save_folder}/fishTail/visualizations/base", list(range(12,20)), flag="")
 

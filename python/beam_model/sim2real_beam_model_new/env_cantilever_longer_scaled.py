@@ -547,10 +547,14 @@ class LongerCantileverEnv3d(EnvBase):
         q = torch.tensor(q, requires_grad=True)
         # sim2real
         q_markers = self.get_markers_3d(q.reshape(-1, 3))
-        diff = -q_markers[:, -1] + torch.from_numpy(
-            self.qs_real_series[i, :, -1]
+        # diff = -q_markers[:, -1] + torch.from_numpy(
+        #     self.qs_real_series[i, :, -1]
+        # )
+        # loss = 0.5 * torch.dot(diff.flatten(), diff.flatten())
+        diff = -q_markers + torch.from_numpy(
+            self.qs_real_series[i, :, :]
         )
-        loss = 0.5 * torch.dot(diff.flatten(), diff.flatten())
+        loss = (diff.flatten()**2).sum()
         loss.backward()
         grad = q.grad.detach().numpy()
         loss = loss.detach().numpy()

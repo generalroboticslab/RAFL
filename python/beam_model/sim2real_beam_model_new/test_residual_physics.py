@@ -11,12 +11,34 @@ import matplotlib.pyplot as plt
 import torch
 from _utils import CantileverDataset
 from _visualization import plot_trajectory, plot_forces_norm
-from env_cantilever import CantileverEnv3d
+from env_cantilever_new import CantileverEnv3d
 from residual_physics.network import ResMLPResidual2, MLPResidual
 from residual_physics.element_force_update import ElementResidual as UpdatedElementResidual
 from residual_physics.element_force import ElementResidual as OldElementResidual
 from py_diff_pd.common.common import ndarray
 from py_diff_pd.common.hex_mesh import get_boundary_face
+
+
+def get_test_params(save_folder):
+
+    if 'longer_scaled' in save_folder:
+        return 296147.7, 0.3000
+    elif 'longer' in save_folder:
+        return 219394.2, 0.4848
+    elif 'shorter_scaled' in save_folder:
+        return 174513.7, 0.3432
+    elif 'shorter' in save_folder:
+        return 178143.5, 0.3142
+    elif 'thicker_scaled' in save_folder:
+        return 215828.9, 0.3407
+    elif 'thicker' in save_folder:
+        return 191847.5, 0.3591
+    elif 'thinner_scaled' in save_folder:
+        return 284503.8, 0.4976
+    elif 'thinner' in save_folder:
+        return 309542.5, 0.4982
+    else:
+        return 233756.7, 0.4760
 
 def test_trajectory(
     cantilever:CantileverEnv3d, save_folder, test_data_idx, transformed_markers, start_frame=0, end_frame=150, cantilever_sim=None,
@@ -37,6 +59,16 @@ def test_trajectory(
             name = k[7:] # remove `module.`
             new_state_dict[name] = v
         model['model'] = new_state_dict
+
+    if 'element' in training_options['model']:
+        from collections import OrderedDict
+        new_state_dict = OrderedDict()
+        for k, v in model['model'].items():
+            if 'unmodelled_nn' in k:
+                name = k 
+                new_state_dict[name] = v
+        model['model'] = new_state_dict
+
 
     dofs = cantilever._dofs
     if training_options["model"] == "skip_connection":
@@ -83,7 +115,10 @@ def test_trajectory(
                                             hidden_size=training_options['hidden_size'],
                                             num_hidden_layer=training_options['num_hidden_layer'],
                                             actuated=training_options['actuated'],
-                                            normalize_inputs=training_options['normalize_inputs'] if 'normalize_inputs' in training_options else True
+                                            normalize_inputs=training_options['normalize_inputs'] if 'normalize_inputs' in training_options else True,
+                                            separated=training_options['separated'] if 'separated' in training_options else True,
+                                            conditioned=training_options['conditioned'] if 'conditioned' in training_options else True,
+                                            stress=training_options['stress'] if 'stress' in training_options else False
                                             )
     elif training_options['model'] == 'element_old':
         g = training_options['state_force_parameters']
@@ -127,13 +162,13 @@ def test_trajectory(
                                             actuated=training_options['actuated']
                                             )
 
-    residual_network.load_state_dict(model["model"])
+    residual_network.load_state_dict(model["model"], strict=False)
     print("The model saves at epoch", model["epoch"])
     print(residual_network.count_parameters())
     residual_network.eval()
 
     ground_truth = np.load(
-        f"cantilever_data_straight/optimized_data_{test_data_idx}.npy",
+        f"cantilever_data_new_straight/optimized_data_{test_data_idx}.npy",
         allow_pickle=True,
     )[()]
     f_optimized = torch.from_numpy(ground_truth["optimized_forces"]).t()[1:]
@@ -142,7 +177,7 @@ def test_trajectory(
     training_set = CantileverDataset(
     training_options["training_set"],
     cantilever._q0,
-    f"cantilever_data_straight",
+    f"cantilever_data_new_straight",
     start_frame=training_options["start_frame"],
     end_frame=training_options["end_frame"],
     )
@@ -173,7 +208,11 @@ def test_trajectory(
     predicted_residual_force_norms = []
     ground_truth_residual_force_norms = []
     normalize = training_options["normalize"]
-    cantilever.vis_dynamic_sim2real_markers(f"{save_folder.replace('training/', '')}/res_{test_data_idx}", q_res.detach().numpy(), cantilever.get_markers_3d(q_res.reshape(-1,3)).detach().numpy(), transformed_markers[0], frame=0)
+
+    # if test_data_idx == 16:
+    #     cantilever.vis_dynamic_sim2real_markers(f"{save_folder.replace('training/', '')}/qs_res_{test_data_idx}", q_res.detach().numpy(), cantilever.get_markers_3d(q_res.reshape(-1,3)).detach().numpy(), transformed_markers[0], frame=0)
+    #     cantilever.vis_dynamic_sim2real_markers(f"{save_folder.replace('training/', '')}/qs_sim_{test_data_idx}", q_res.detach().numpy(), cantilever.get_markers_3d(q_res.reshape(-1,3)).detach().numpy(), transformed_markers[0], frame=0)
+    #     cantilever.vis_dynamic_sim2real_markers(f"{save_folder.replace('training/', '')}/qs_origin_{test_data_idx}", q_res.detach().numpy(), cantilever.get_markers_3d(q_res.reshape(-1,3)).detach().numpy(), transformed_markers[0], frame=0)
     time_sim = 0
     time_res = 0
     time_origin = 0
@@ -253,7 +292,8 @@ def test_trajectory(
         except:
             print("Solver fails at frame", frame_i)
             break
-        # if frame_i % 10 == 0:
+        # if test_data_idx == 16:
+        #     cantilever.vis_dynamic_sim2real_markers(f"{save_folder.replace('training/', '')}/qs_origin_{test_data_idx}", q_origin.detach().numpy(), cantilever.get_markers_3d(q_origin.reshape(-1,3)).detach().numpy(), transformed_markers[frame_i], frame=frame_i)
         #     cantilever.vis_dynamic_sim2real_markers(f"{save_folder.replace('training/', '')}/qs_res_{test_data_idx}", q_res.detach().numpy(), cantilever.get_markers_3d(q_res.reshape(-1,3)).detach().numpy(), transformed_markers[frame_i], frame=frame_i)
         #     cantilever.vis_dynamic_sim2real_markers(f"{save_folder.replace('training/', '')}/qs_sim_{test_data_idx}", q_sim.detach().numpy(), cantilever.get_markers_3d(q_sim.reshape(-1,3)).detach().numpy(), transformed_markers[frame_i], frame=frame_i)
         qs_sim.append(q_sim.detach().numpy())
@@ -262,6 +302,7 @@ def test_trajectory(
         vs_res.append(v_res.detach().numpy())
         qs_origin.append(q_origin.detach().numpy())
         vs_origin.append(v_origin.detach().numpy())
+    
     np.save(f"{save_folder}/qs_sim_{test_data_idx}.npy", qs_sim)
     np.save(f"{save_folder}/qs_res_{test_data_idx}.npy", qs_res)
     np.save(f"{save_folder}/vs_sim_{test_data_idx}.npy", vs_sim)
@@ -354,7 +395,7 @@ if __name__ == "__main__":
     weights = [0.05, 0.06, 0.07, 0.1, 0.09, 0.08, 0.11, 0.12, 0.15, 0.09, 0.13, 0.14, 0.16, 0.17, 0.2,0.18,0.22,0.21]
 
 
-    save_folder = f"training/test_refactor_element_zero_transformer_direct"
+    save_folder = f"training/test_refactor_element_nonWeighted_try_unseparated_unconditioned_direct"
     sim_errors = []
     res_errors = []
     origin_errors = []
@@ -380,8 +421,12 @@ if __name__ == "__main__":
         }
 
         cantilever = CantileverEnv3d(42, 'beam', hex_params)
-        hex_params['youngs_modulus'] = 240619.6  #810695.1
-        hex_params['poissons_ratio'] = 0.4951 #0.499
+        # hex_params['youngs_modulus'] = 233756.7   #116260.6 #233756.7  
+        # hex_params['poissons_ratio'] = 0.4760 #0.499 #0.4760 
+
+        hex_params['youngs_modulus'], hex_params['poissons_ratio'] = get_test_params(save_folder)
+
+
         cantilever_sim = CantileverEnv3d(42, 'beam', hex_params)
         q_init = torch.from_numpy(cantilever._q0)
         q0 = torch.from_numpy(cantilever._q0)
@@ -391,7 +436,7 @@ if __name__ == "__main__":
         # qs_real_ = np.load("weight_data_ordered/q_data_reorder.npz")
         # steady_state = qs_real_[f'arr_0'][:, :, -1] * 1e-3
         
-        qs_real = np.load(f"data/q{test_i}.npy")
+        qs_real = np.load(f"data_new/q{test_i}.npy")
         steady_state = qs_real[0] * 1e-3
         
         R, t = cantilever.fit_realframe(steady_state)

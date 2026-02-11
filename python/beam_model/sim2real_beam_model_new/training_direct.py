@@ -10,7 +10,7 @@ import torch
 import argparse
 from _utils import CantileverDataset
 from _visualization import plot_trajectory, plot_forces_norm
-from env_cantilever import CantileverEnv3d
+from env_cantilever_new import CantileverEnv3d
 from residual_physics.network import ResMLPResidual2, MLPResidual
 from residual_physics.element_force_update import ElementResidual
 from py_diff_pd.common.common import ndarray
@@ -72,7 +72,10 @@ def train(
                                             hidden_size=training_options['hidden_size'],
                                             num_hidden_layer=training_options['num_hidden_layer'],
                                             actuated=training_options['actuated'],
-                                            normalize_inputs=training_options['normalize_inputs']
+                                            normalize_inputs=training_options['normalize_inputs'],
+                                            separated=training_options['separated'] if 'separated' in training_options else True,
+                                            conditioned=training_options['conditioned'] if 'conditioned' in training_options else True,
+                                            stress=training_options['stress'] if 'stress' in training_options else False
                                             )
 
     model_input = f"residual_network"
@@ -84,7 +87,7 @@ def train(
     training_set = CantileverDataset(
     training_options["training_set"],
     cantilever._q0,
-    f"cantilever_data_straight",
+    f"cantilever_data_new_straight",
     start_frame=training_options["start_frame"],
     end_frame=training_options["end_frame"],
     )
@@ -109,7 +112,7 @@ def train(
         for epoch in range(num_epochs):
             train_loss = 0
             for data_idx in training_options["training_set"]:
-                qs_real = np.load(f'data/q{data_idx}.npy' )
+                qs_real = np.load(f'data_new/q{data_idx}.npy' )
 
                 if epoch == 0 and data_idx == training_options['training_set'][0]:
                     initial_real_marker = qs_real[0,:,:]*1e-3
@@ -124,7 +127,7 @@ def train(
 
                 target_data = torch.tensor(real_markers, dtype=torch.float64)
 
-                q_arr = np.load(f"cantilever_data_straight/q_force_opt{data_idx}_reorder.npz")['arr_%d' % (len(np.load(f"cantilever_data_straight/q_force_opt{data_idx}_reorder.npz"))-1)]
+                q_arr = np.load(f"cantilever_data_new_straight/q_force_opt{data_idx}_reorder.npz")['arr_%d' % (len(np.load(f"cantilever_data_new_straight/q_force_opt{data_idx}_reorder.npz"))-1)]
                 q = torch.from_numpy(q_arr)
                 v = torch.zeros(cantilever.dofs, dtype=torch.float64)
 
@@ -154,9 +157,14 @@ def train(
                                 )[0]
                                 res_force = training_set.denormalize(f=res_force_normalized.cpu())[0]
                         else:
-                            res_force_normalized = residual_network(
-                                torch.cat((q, v), dim=0).to(device)
-                            )[0]
+                            if 'element' in training_options['model']:
+                                res_force_normalized = residual_network(
+                                    torch.cat((q, v), dim=0).to(device)
+                                )[0]
+                            else:
+                                res_force_normalized = residual_network(
+                                     torch.cat((q - q_init, v), dim=0).expand(1, -1).to(device)
+                                )[0]
                             # res_force = training_set.denormalize(f=res_force_normalized.cpu(), normalization_params=(None, None, None, None, f_mean, f_std))[0]
                             res_force = res_force_normalized.cpu()
 
@@ -167,7 +175,7 @@ def train(
                         qx_marker = cantilever.get_markers_3d(qx)
 
                         data_loss = ((-qx_marker.flatten() + target_data[frame_i].flatten())**2).sum()
-                        loss = data_loss 
+                        loss = data_loss + 1e-4 * (res_force**2).sum()
                         total_loss.append(loss)
 
                         
@@ -193,7 +201,7 @@ def train(
             with torch.no_grad():
                 val_loss = 0
                 for data_idx in training_options["validate_set"]:
-                    qs_real = np.load(f'data/q{data_idx}.npy' )
+                    qs_real = np.load(f'data_new/q{data_idx}.npy' )
 
                     real_markers_old = qs_real[1:,:,:] * 1e-3
                     real_markers = np.zeros((real_markers_old.shape[0],real_markers_old.shape[1],real_markers_old.shape[2]),dtype=np.float64)
@@ -202,7 +210,7 @@ def train(
 
                     target_data = torch.from_numpy(real_markers)
 
-                    q_arr = np.load(f"cantilever_data_straight/q_force_opt{data_idx}_reorder.npz")['arr_%d' % (len(np.load(f"cantilever_data_straight/q_force_opt{data_idx}_reorder.npz"))-1)]
+                    q_arr = np.load(f"cantilever_data_new_straight/q_force_opt{data_idx}_reorder.npz")['arr_%d' % (len(np.load(f"cantilever_data_new_straight/q_force_opt{data_idx}_reorder.npz"))-1)]
                     q = torch.from_numpy(q_arr)
                     v = torch.zeros(cantilever.dofs, dtype=torch.float64)
 
@@ -232,9 +240,14 @@ def train(
                                     )[0]
                                     res_force = training_set.denormalize(f=res_force_normalized.cpu())[0]
                             else:
-                                res_force_normalized = residual_network(
-                                    torch.cat((q, v), dim=0).to(device)
-                                )[0]
+                                if 'element' in training_options['model']:
+                                    res_force_normalized = residual_network(
+                                        torch.cat((q, v), dim=0).to(device)
+                                    )[0]
+                                else:
+                                    res_force_normalized = residual_network(
+                                        torch.cat((q - q_init, v), dim=0).expand(1, -1).to(device)
+                                    )[0]
                                 # res_force = training_set.denormalize(f=res_force_normalized.cpu(), normalization_params=(None, None, None, None, f_mean, f_std))[0]
                                 res_force = res_force_normalized.cpu()
                             q, v = cantilever.forward(q, v, f_ext=res_force, dt=0.01)
@@ -313,7 +326,9 @@ if __name__ == "__main__":
     config["num_hidden_layer"] = 4
     config["num_mlp_blocks"] = 5
     config["normalize_inputs"] = False
-
+    config["separated"] = False
+    config["conditioned"] = False
+    config['stress'] = False
 
     youngs_modulus = 215856
     poissons_ratio = 0.45
@@ -330,7 +345,7 @@ if __name__ == "__main__":
     cantilever = CantileverEnv3d(42, 'beam', hex_params)
     q_init = torch.from_numpy(cantilever._q0)
 
-    save_folder = f"training/test_refactor_element_zero_transformer_direct"
+    save_folder = f"training/test_refactor_directelement_nonWeighted_try_unseparated_unconditioned_noSpin_direct"
     os.makedirs(f"{save_folder}", exist_ok=True)
     
     config["data_folder"] = save_folder.replace("training/", "")

@@ -75,7 +75,9 @@ def test_trajectory(
                                             hidden_size=training_options['hidden_size'],
                                             num_hidden_layer=training_options['num_hidden_layer'],
                                             actuated=training_options['actuated'],
-                                            normalize_inputs=training_options['normalize_inputs'] if 'normalize_inputs' in training_options else True
+                                            normalize_inputs=training_options['normalize_inputs'] if 'normalize_inputs' in training_options else True,
+                                            separated=training_options['separated'] if 'separated' in training_options else True,
+                                            conditioned=training_options['conditioned'] if 'conditioned' in training_options else True
                                             )
     elif training_options['model'] == 'element_old':
         g = training_options['state_force_parameters']
@@ -125,13 +127,14 @@ def test_trajectory(
     model = torch.load(f"{save_folder}/{model_input}.pth", map_location=device)
 
     # create new OrderedDict that does not contain `module.`
-    from collections import OrderedDict
-    new_state_dict = OrderedDict()
-    for k, v in model['model'].items():
-        if 'unmodelled_nn' in k:
-            name = k 
-            new_state_dict[name] = v
-    model['model'] = new_state_dict
+    if 'element' in training_options['model']:
+        from collections import OrderedDict
+        new_state_dict = OrderedDict()
+        for k, v in model['model'].items():
+            if 'unmodelled_nn' in k:
+                name = k 
+                new_state_dict[name] = v
+        model['model'] = new_state_dict
 
     residual_network.load_state_dict(model["model"], strict=False)
     print("The model saves at epoch", model["epoch"])
@@ -175,10 +178,10 @@ def test_trajectory(
     #f_mean, f_std = torch.mean(training_set.fs.view(-1,3), dim=0).expand(q0.shape[0] // 3, 3).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(q0.shape[0] // 3, 3).flatten()
     f_mean, f_std = torch.zeros(q0.shape[0]).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(q0.shape[0] // 3, 3).flatten()
     
-    # Path(f"{save_folder}/shorter_scaled/visualizations/residual/{test_data_idx}").mkdir(parents=True, exist_ok=True)
-    # Path(f"{save_folder}/shorter_scaled/visualizations/base/{test_data_idx}").mkdir(parents=True, exist_ok=True)
-    # cantilever.display_mesh(q_res.detach(), f"{save_folder}/shorter_scaled/visualizations/residual/{test_data_idx}/0.png")
-    # cantilever_sim.display_mesh(q_sim.detach(), f"{save_folder}/shorter_scaled/visualizations/base/{test_data_idx}/0.png")
+    Path(f"{save_folder}/shorter_scaled/visualizations/residual/{test_data_idx}").mkdir(parents=True, exist_ok=True)
+    Path(f"{save_folder}/shorter_scaled/visualizations/base/{test_data_idx}").mkdir(parents=True, exist_ok=True)
+    cantilever.display_mesh(q_res.detach(), f"{save_folder}/shorter_scaled/visualizations/residual/{test_data_idx}/0.png")
+    cantilever_sim.display_mesh(q_sim.detach(), f"{save_folder}/shorter_scaled/visualizations/base/{test_data_idx}/0.png")
 
     for frame_i in range(1, end_frame):
         if normalize:
@@ -226,36 +229,36 @@ def test_trajectory(
         qs_res.append(q_res.detach().numpy())
         vs_sim.append(v_sim.detach().numpy())
         vs_res.append(v_res.detach().numpy())
-    #     cantilever.display_mesh(q_res.detach(), f"{save_folder}/shorter_scaled/visualizations/residual/{test_data_idx}/{frame_i}.png")
-    #     cantilever_sim.display_mesh(q_sim.detach(), f"{save_folder}/shorter_scaled/visualizations/base/{test_data_idx}/{frame_i}.png")
+        cantilever.display_mesh(q_res.detach(), f"{save_folder}/shorter_scaled/visualizations/residual/{test_data_idx}/{frame_i}.png")
+        cantilever_sim.display_mesh(q_sim.detach(), f"{save_folder}/shorter_scaled/visualizations/base/{test_data_idx}/{frame_i}.png")
 
-    # if normalize:
-    #     (
-    #         q_res_normalized,
-    #         v_res_normalized,
-    #     ) = training_set.normalize(q=q_res - q_init, v=v_res)
-    #     res_force_normalized = residual_network(
-    #         torch.cat(
-    #             (q_res_normalized, v_res_normalized),
-    #             dim=0,
-    #         ).expand(1, -1)
-    #     )[0]
-    #     res_force = training_set.denormalize(f=res_force_normalized)[0]
-    # else:
-    #     res_force_normalized = residual_network(
-    #         torch.cat((q_res, v_res), dim=0)
-    #     )[0]
-    #     res_force = training_set.denormalize(f=res_force_normalized, normalization_params=(None, None, None, None, f_mean, f_std))[0]
-    # try:
-    #     q_res, v_res = cantilever.forward(
-    #         q_res, v_res, f_ext=res_force, dt=0.01
-    #     )
-    #     q_sim, v_sim = cantilever_sim.forward(q_sim, v_sim, f_ext=torch.zeros_like(q_sim), dt=0.01)
+    if normalize:
+        (
+            q_res_normalized,
+            v_res_normalized,
+        ) = training_set.normalize(q=q_res - q_init, v=v_res)
+        res_force_normalized = residual_network(
+            torch.cat(
+                (q_res_normalized, v_res_normalized),
+                dim=0,
+            ).expand(1, -1)
+        )[0]
+        res_force = training_set.denormalize(f=res_force_normalized)[0]
+    else:
+        res_force_normalized = residual_network(
+            torch.cat((q_res, v_res), dim=0)
+        )[0]
+        res_force = training_set.denormalize(f=res_force_normalized, normalization_params=(None, None, None, None, f_mean, f_std))[0]
+    try:
+        q_res, v_res = cantilever.forward(
+            q_res, v_res, f_ext=res_force, dt=0.01
+        )
+        q_sim, v_sim = cantilever_sim.forward(q_sim, v_sim, f_ext=torch.zeros_like(q_sim), dt=0.01)
 
-    #     cantilever.display_mesh(q_res.detach(), f"{save_folder}/shorter_scaled/visualizations/residual/{test_data_idx}/{end_frame}.png")
-    #     cantilever_sim.display_mesh(q_sim.detach(), f"{save_folder}/shorter_scaled/visualizations/base/{test_data_idx}/{end_frame}.png")
-    # except:
-    #     pass
+        cantilever.display_mesh(q_res.detach(), f"{save_folder}/shorter_scaled/visualizations/residual/{test_data_idx}/{end_frame}.png")
+        cantilever_sim.display_mesh(q_sim.detach(), f"{save_folder}/shorter_scaled/visualizations/base/{test_data_idx}/{end_frame}.png")
+    except:
+        pass
 
     np.save(f"{save_folder}/shorter_scaled/qs_sim_{test_data_idx}.npy", qs_sim)
     np.save(f"{save_folder}/shorter_scaled/qs_res_{test_data_idx}.npy", qs_res)
@@ -324,7 +327,7 @@ if __name__ == "__main__":
         'refinement': 1,
     }
 
-    save_folder = "training/test_refactor_element_zero_transformer_direct"
+    save_folder = "training/test_refactor_element_nonWeighted_try_unseparated_unconditioned_direct"
     os.makedirs(f"{save_folder}/shorter_scaled/", exist_ok=True)
     os.makedirs(f"{save_folder}/shorter_scaled/visualizations", exist_ok=True)
     os.makedirs(f"{save_folder}/shorter_scaled/visualizations/residual", exist_ok=True)
@@ -356,5 +359,5 @@ if __name__ == "__main__":
     np.save(f"{save_folder}/shorter_scaled/res_errors_residual_network.npy", sim_errors)
     np.save(f"{save_folder}/shorter_scaled/res_errors_residual_network.npy", res_errors)
 
-    # generate_video_directory(f"{save_folder}/shorter_scaled/visualizations/residual", list(range(12,20)), flag="")
-    # generate_video_directory(f"{save_folder}/shorter_scaled/visualizations/base", list(range(12,20)), flag="")
+    generate_video_directory(f"{save_folder}/shorter_scaled/visualizations/residual", list(range(12,20)), flag="")
+    generate_video_directory(f"{save_folder}/shorter_scaled/visualizations/base", list(range(12,20)), flag="")

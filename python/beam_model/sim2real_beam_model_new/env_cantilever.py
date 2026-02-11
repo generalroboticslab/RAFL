@@ -140,12 +140,12 @@ class CantileverEnv3d(EnvBase):
                 [0.08, 0.0, 0.0295],
                 [0.01, 0.0, 0.0005],
                 [0.02, 0.0, 0.0005],
-                [0.031, 0.0, 0.0005],
+                [0.03, 0.0, 0.0005],
                 [0.04, 0.0, 0.0005],
                 [0.05, 0.0, 0.0005],
-                [0.0605, 0.0, 0.0005],
-                [0.0705, 0.0, 0.0005],
-                [0.0805, 0.0, 0.0005],
+                [0.06, 0.0, 0.0005],
+                [0.07, 0.0, 0.0005],
+                [0.08, 0.0, 0.0005],
                 [0.01, 0.03, 0.0295],
                 [0.02, 0.03, 0.0295],
                 [0.03, 0.03, 0.0295],
@@ -156,12 +156,12 @@ class CantileverEnv3d(EnvBase):
                 [0.08, 0.03, 0.0295],
                 [0.01, 0.03, 0.0005],
                 [0.02, 0.03, 0.0005],
-                [0.031, 0.03, 0.0005],
+                [0.03, 0.03, 0.0005],
                 [0.04, 0.03, 0.0005],
                 [0.05, 0.03, 0.0005],
-                [0.0605, 0.03, 0.0005],
-                [0.0705, 0.03, 0.0005],
-                [0.0805, 0.03, 0.0005],
+                [0.06, 0.03, 0.0005],
+                [0.07, 0.03, 0.0005],
+                [0.08, 0.03, 0.0005],
             ]
         )
 
@@ -546,10 +546,14 @@ class CantileverEnv3d(EnvBase):
         q = torch.tensor(q, requires_grad=True)
         # sim2real
         q_markers = self.get_markers_3d(q.reshape(-1, 3))
-        diff = -q_markers[:, -1] + torch.from_numpy(
-            self.qs_real_series[i, :, -1]
+        # diff = -q_markers[:, -1] + torch.from_numpy(
+        #     self.qs_real_series[i, :, -1]
+        # )
+        # loss = 0.5 * torch.dot(diff.flatten(), diff.flatten())
+        diff = -q_markers + torch.from_numpy(
+            self.qs_real_series[i, :, :]
         )
-        loss = 0.5 * torch.dot(diff.flatten(), diff.flatten())
+        loss = (diff.flatten()**2).sum()
         loss.backward()
         grad = q.grad.detach().numpy()
         loss = loss.detach().numpy()

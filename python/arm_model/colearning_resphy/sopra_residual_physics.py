@@ -15,7 +15,7 @@ from residual_physics.network import MLPResidual, ResMLPResidual2
 from model import SupervisedLearningForward, PhysicsForward, LearningFoward
 from validate_residual_physics import main as val_main
 from residual_physics.residual_physics import ResidualPhysicsBase
-from residual_physics.element_force import ElementResidual
+from residual_physics.element_force_update import ElementResidual
 from py_diff_pd.common.common import ndarray
 import os
 import torch.distributed as dist
@@ -73,21 +73,32 @@ class SoPrAResidualPhysics(ResidualPhysicsBase):
                 lam.append(la)
                 rho.append(diffpd_model._deformable.density())
             
+            surface_faces = diffpd_model._get_boundary_ordered()
             elements = ndarray(elements)
             mu = ndarray(mu)
             lam = ndarray(lam)
             rho = ndarray(rho)
+            
+            inner_faces = np.concatenate(diffpd_model._inner_faces)
+            force_nodes = []
+            for face in inner_faces:
+                force_nodes.extend(face)
+
+            force_nodes = np.array(list(set(force_nodes)))
+
 
             self.residual_network = ElementResidual(diffpd_model._dofs, 
                                                     torch.tensor(elements), 
+                                                    torch.tensor(surface_faces),
                                                     torch.tensor(mu), 
                                                     torch.tensor(lam), 
                                                     torch.tensor(rho), 
-                                                    torch.tensor(diffpd_model._q0), 
+                                                    diffpd_model._q0, 
                                                     None,
                                                     hidden_size=config['hidden_size'],
                                                     num_hidden_layer=config['num_hidden_layer'],
-                                                    actuated=config['actuated']
+                                                    actuated=config['actuated'],
+                                                    force_nodes=torch.tensor(force_nodes)
                                                     )
         
         
@@ -224,12 +235,12 @@ class SoPrAResidualPhysics(ResidualPhysicsBase):
                         f_optimized,
                     )
                 else:
-                    (
-                        f_optimized,
-                    ) = training_set.normalize(
-                        None,None,None,
-                        f_optimized, (None, None, None, None, None, None, f_mean, f_std)
-                    )
+                    # (
+                    #     f_optimized,
+                    # ) = training_set.normalize(
+                    #     None,None,None,
+                    #     f_optimized, (None, None, None, None, None, None, f_mean, f_std)
+                    # )
                     q_start_batch = q_start_batch + training_set.q_init.unsqueeze(0)
                 q_start_batch = q_start_batch.to(device)
                 v_start_batch = v_start_batch.to(device)
@@ -239,7 +250,7 @@ class SoPrAResidualPhysics(ResidualPhysicsBase):
                 residual_forces = self.residual_network(
                     torch.cat((q_start_batch, v_start_batch, pressure_forces_batch), dim=1)
                 )
-                loss = self.loss_fn(residual_forces, f_optimized)   # scalar per-rank
+                loss = self.loss_fn(residual_forces, f_optimized) * self.scaling   # scalar per-rank
 
                 loss.backward()
                 self.optimizer.step()
@@ -296,10 +307,10 @@ class SoPrAResidualPhysics(ResidualPhysicsBase):
                         q_start_batch, v_start_batch, pressure_forces_batch, f_optimized
                     )
                 else:
-                    (f_optimized,) = training_set.normalize(
-                        None, None, None, f_optimized,
-                        (None, None, None, None, None, None, f_mean, f_std)
-                    )
+                    # (f_optimized,) = training_set.normalize(
+                    #     None, None, None, f_optimized,
+                    #     (None, None, None, None, None, None, f_mean, f_std)
+                    # )
                     q_start_batch = q_start_batch + training_set.q_init.unsqueeze(0)
 
                 q_start_batch = q_start_batch.to(device)
@@ -308,7 +319,7 @@ class SoPrAResidualPhysics(ResidualPhysicsBase):
                 f_optimized = f_optimized.to(device)
 
                 pred = model_ref(torch.cat((q_start_batch, v_start_batch, pressure_forces_batch), dim=1))
-                loss = self.loss_fn(pred, f_optimized)
+                loss = self.loss_fn(pred, f_optimized)  * self.scaling
 
                 local_sum += float(loss.item()) * batch_size
                 local_count += batch_size

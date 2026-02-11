@@ -74,7 +74,10 @@ def test_trajectory(
                                             hidden_size=training_options['hidden_size'],
                                             num_hidden_layer=training_options['num_hidden_layer'],
                                             actuated=training_options['actuated'],
-                                            normalize_inputs=training_options['normalize_inputs'] if 'normalize_inputs' in training_options else True
+                                            normalize_inputs=training_options['normalize_inputs'] if 'normalize_inputs' in training_options else True,
+                                            separated=training_options['separated'] if 'separated' in training_options else True,
+                                            conditioned=training_options['conditioned'] if 'conditioned' in training_options else True,
+                                            stress=training_options['stress'] if 'strress' in training_options else False
                                             )
     elif training_options['model'] == 'element_old':
         youngs_modulus = 215856
@@ -351,7 +354,7 @@ if __name__ == "__main__":
         'refinement': 1,
     }
     # save_folder = f"training/sim2simResMLP5"
-    save_folder = "training/test_refactor_element_zero_transformer_direct" 
+    save_folder = f"training/test_refactor_element_nonWeighted_try_unseparated_unconditioned_direct"
     cantilever = CantileverEnv3d(42, save_folder, hex_params)
 
     os.makedirs(f"{save_folder}/visualizations", exist_ok=True)

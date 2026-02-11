@@ -26,7 +26,7 @@ class HangingCantileverEnv3d (EnvBase):
 
         # Solid
         youngs_modulus_1 = (
-            options["youngs_modulus_1"] if "youngs_modulus_1" in options else 96500#500000
+            options["youngs_modulus_1"] if "youngs_modulus_1" in options else 500000 #96500#
         )
         poissons_ratio_1 = (
             options["poissons_ratio_1"] if "poissons_ratio_1" in options else 0.499#0.42
@@ -34,7 +34,7 @@ class HangingCantileverEnv3d (EnvBase):
 
         # Liquid
         youngs_modulus_2 = (
-            options["youngs_modulus_2"] if "youngs_modulus_2" in options else 28600 #4000000
+            options["youngs_modulus_2"] if "youngs_modulus_2" in options else 4000000 #28600 #
         )
         poissons_ratio_2 = (
             options["poissons_ratio_2"] if "poissons_ratio_2" in options else 0.499#0.45
@@ -73,7 +73,7 @@ class HangingCantileverEnv3d (EnvBase):
         self.frequency = options["frequency"] if "frequency" in options else 15
 
         ### Mesh Parameters
-        # Cantilever is 0.03m long, 0.03m wide, and 0.3 m tall
+        # Cantilever is 0.0105m long, 0.0105m wide, and 0.105 m tall
         dx = 0.0035
         cell_nums = (3, 3, 30)
         node_nums = (cell_nums[0] + 1, cell_nums[1] + 1, cell_nums[2] + 1)

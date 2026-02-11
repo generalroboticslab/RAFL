@@ -70,6 +70,8 @@ class CantileverResidualPhysics(ResidualPhysicsBase):
             lam = ndarray(lam)
             rho = ndarray(rho)
 
+            self.scaling = len(elements) * 8
+
             self.residual_network = UpdatedElementResidual(diffpd_model._dofs, 
                                                     torch.tensor(elements), 
                                                     torch.tensor(surface_faces),
@@ -81,6 +83,9 @@ class CantileverResidualPhysics(ResidualPhysicsBase):
                                                     hidden_size=config['hidden_size'],
                                                     num_hidden_layer=config['num_hidden_layer'],
                                                     actuated=config['actuated'],
+                                                    normalize_inputs=config['normalize_inputs'] if 'normalize_inputs' in config else True,
+                                                    separated=config['separated'] if 'separated' in config else True,
+                                                    conditioned=config['conditioned'] if 'conditioned' in config else True,
                                                     )
         elif config["model"] == "element_old":
             self.model_type = 'element'

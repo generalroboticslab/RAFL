@@ -74,6 +74,9 @@ def test_trajectory(
                                             hidden_size=training_options['hidden_size'],
                                             num_hidden_layer=training_options['num_hidden_layer'],
                                             actuated=training_options['actuated'],
+                                            normalize_inputs=training_options['normalize_inputs'] if 'normalize_inputs' in training_options else True,
+                                            separated=training_options['separated'] if 'separated' in training_options else True,
+                                            conditioned=training_options['conditioned'] if 'conditioned' in training_options else True
                                             )
     elif training_options['model'] == 'element_old':
         g = training_options['state_force_parameters']
@@ -288,7 +291,7 @@ if __name__ == "__main__":
     default_cantilever = CantileverEnv3d(42, 'beam', hex_params)
     q_init = torch.from_numpy(cantilever._q0)
 
-    save_folder = f"training/test_refactor_element_zero_3"
+    save_folder = "training/test_refactor_element_nonWeighted_try_unseparated_unconditioned_direct"
     os.makedirs(f"{save_folder}/thinner/", exist_ok=True)
     sim_errors = []
     res_errors = []

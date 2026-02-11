@@ -73,7 +73,10 @@ def train(
                                             hidden_size=training_options['hidden_size'],
                                             num_hidden_layer=training_options['num_hidden_layer'],
                                             actuated=training_options['actuated'],
-                                            normalize_inputs=training_options['normalize_inputs']
+                                            normalize_inputs=training_options['normalize_inputs'],
+                                            separated=training_options['separated'] if 'separated' in training_options else True,
+                                            conditioned=training_options['conditioned'] if 'conditioned' in training_options else True,
+                                            stress=training_options['stress'] if 'stress' in training_options else False
                                             )
 
     model_input = f"residual_network"
@@ -178,7 +181,7 @@ def train(
 
                         q, v = cantilever.forward(q, v, f_ext=res_force, dt=0.01)
                         data_loss = ((target_trajectory_q[frame_i] - q)**2).sum()
-                        loss = data_loss 
+                        loss = data_loss + 1e-4 * (res_force**2).sum()
                         total_loss.append(loss)
                     except Exception as e:
                         # Get the exception type name and message
@@ -291,18 +294,22 @@ if __name__ == "__main__":
     config["cuda"] = 1
     config["normalize"] = False 
     config["Inialization"] = 1e-3
-    config["scale"] = 1 #e3#e6
+    config["scale"] = 1e3#e6
     config["data_type"] = "optimized"
     config["weight_decay"] = 1e-5
     config["fit"] = "forces"
     # config["fit"] = "SITL"
     # config["model"] = "element"
-    config["model"] = "skip_connection"
+    config["model"] = "element"
     config["num_mlp_blocks"] = 5
-    config["hidden_size"] = 512
-    config["num_hidden_layer"] = 3
+    config["hidden_size"] = 64
+    config["num_hidden_layer"] = 4
     config["actuated"] = True
     config["normalize_inputs"] = False
+    config["separated"] = False
+    config["conditioned"] = False
+    config['stress'] = False
+
     youngs_modulus = 215856
     poissons_ratio = 0.45
     density = 1.07e3
@@ -318,7 +325,7 @@ if __name__ == "__main__":
     cantilever = CantileverEnv3d(42, 'beam', hex_params)
     q_init = torch.from_numpy(cantilever._q0)
 
-    save_folder = f"training/test_refactor_direct"
+    save_folder = f"training/test_refactor_direct_element_nonWeighted_try_unseparated_unconditioned_noSpin_direct"
     os.makedirs(f"{save_folder}", exist_ok=True)
 
     config["data_folder"] = save_folder.replace("training/", "")

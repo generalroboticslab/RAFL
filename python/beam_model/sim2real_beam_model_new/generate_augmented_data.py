@@ -4,7 +4,7 @@ sys.path.append('../..')
 
 import numpy as np
 import torch
-from env_cantilever import CantileverEnv3d
+from env_cantilever_new import CantileverEnv3d
 from init_beam import optimize_init_force
 from optimize_trajectory import optimize_trajectoryfull
 
@@ -15,8 +15,8 @@ if __name__ == '__main__':
     forward = 0
     forward_times = []
     transformed_data = []
-    idxs = [0,2,3] #,4,5,6,7,8,10,11,12,13,14,15,16,17]
-    for idx in idxs[::-1]:
+    idxs = [0,2,3,4,5,6,7,8,10,11,12,13,14,15,16,17]
+    for idx in idxs:
         youngs_modulus = 215856
         poissons_ratio = 0.45
         density = 1.07e3
@@ -29,7 +29,7 @@ if __name__ == '__main__':
             'mesh_type': 'hex',
             'refinement': 1,
         }
-        cantilever = CantileverEnv3d(42, f'cantilever_data_straight/test{idx}', hex_params)
+        cantilever = CantileverEnv3d(42, f'cantilever_data_straight_new/test{idx}', hex_params)
         q_init = cantilever._q0
         q0 = torch.from_numpy(cantilever._q0)
         q_ = q0.reshape(-1, 3)
@@ -37,7 +37,7 @@ if __name__ == '__main__':
         weight = weights[idx] * 9.80709
         res_force = torch.zeros(q0.shape, dtype=torch.float64)
         res_force[-16::3] = - weight / 16
-        qs_real = np.load(f"data/q{idx}.npy")
+        qs_real = np.load(f"data_new/q{idx}.npy")
         steady_state = qs_real[0] * 1e-3
 
         R, t = cantilever.fit_realframe(steady_state)
@@ -51,7 +51,7 @@ if __name__ == '__main__':
         cantilever.interpolate_markers_3d(q_.detach().numpy(), steady_state_transformed)
         num_epochs = 300
         num_frames = 150
-        optimize_init_force(num_epochs, num_frames, target, cantilever, 0.01, id=idx, res_force=res_force, suffix="straight")
+        optimize_init_force(num_epochs, num_frames, target, cantilever, 0.01, id=idx, res_force=res_force, suffix="straight_new")
         target_data = qs_real[1:,:,:] * 1e-3
         target_data_flatten = np.zeros((target_data.shape[1] * target_data.shape[2], target_data.shape[0]))
         for i in range(num_frames):
@@ -61,4 +61,4 @@ if __name__ == '__main__':
         
         num_frames = 150
         num_epochs = 300
-        optimize_trajectoryfull(f'cantilever_data_straight/test{idx}', cantilever, num_frames, num_epochs, target_data_flatten, 0.01, idx, suffix="straight")
+        optimize_trajectoryfull(f'cantilever_data_straight_new/test{idx}', cantilever, num_frames, num_epochs, target_data_flatten, 0.01, idx, suffix="straight_new")

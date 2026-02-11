@@ -11,13 +11,34 @@ import matplotlib.pyplot as plt
 import torch
 from _utils import CantileverDataset
 from _visualization import plot_trajectory, plot_forces_norm
-from env_cantilever import CantileverEnv3d
+from env_cantilever_new import CantileverEnv3d
 from env_cantilever_longer_scaled import LongerCantileverEnv3d
 from residual_physics.network import ResMLPResidual2, MLPResidual
 from residual_physics.element_force_update import ElementResidual as UpdatedElementResidual
 from residual_physics.element_force import ElementResidual as OldElementResidual
 from py_diff_pd.common.common import ndarray
 from py_diff_pd.common.hex_mesh import get_boundary_face
+
+def get_test_params(save_folder):
+
+    if 'longer_scaled' in save_folder:
+        return 296147.7, 0.3000
+    elif 'longer' in save_folder:
+        return 219394.2, 0.4848
+    elif 'shorter_scaled' in save_folder:
+        return 174513.7, 0.3432
+    elif 'shorter' in save_folder:
+        return 178143.5, 0.3142
+    elif 'thicker_scaled' in save_folder:
+        return 215828.9, 0.3407
+    elif 'thicker' in save_folder:
+        return 191847.5, 0.3591
+    elif 'thinner_scaled' in save_folder:
+        return 284503.8, 0.4976
+    elif 'thinner' in save_folder:
+        return 309542.5, 0.4982
+    else:
+        return 233756.7, 0.4760
 
 def test_trajectory(
     cantilever:CantileverEnv3d, save_folder, test_data_idx, transformed_markers, start_frame=0, end_frame=150, cantilever_sim=None, default_cantilever=None
@@ -37,6 +58,14 @@ def test_trajectory(
         for k, v in model['model'].items():
             name = k[7:] # remove `module.`
             new_state_dict[name] = v
+    
+    if 'element' in training_options['model']:
+        from collections import OrderedDict
+        new_state_dict = OrderedDict()
+        for k, v in model['model'].items():
+            if 'unmodelled_nn' in k:
+                name = k 
+                new_state_dict[name] = v
         model['model'] = new_state_dict
 
     dofs = cantilever._dofs
@@ -84,7 +113,10 @@ def test_trajectory(
                                             hidden_size=training_options['hidden_size'],
                                             num_hidden_layer=training_options['num_hidden_layer'],
                                             actuated=training_options['actuated'],
-                                            normalize_inputs=training_options['normalize_inputs'] if 'normalize_inputs' in training_options else True
+                                            normalize_inputs=training_options['normalize_inputs'] if 'normalize_inputs' in training_options else True,
+                                            multi_shape='all' in save_folder,
+                                            separated=training_options['separated'] if 'separated' in training_options else True,
+                                            conditioned=training_options['conditioned'] if 'conditioned' in training_options else True
                                             )
     elif training_options['model'] == 'element_old':
         g = training_options['state_force_parameters']
@@ -128,7 +160,7 @@ def test_trajectory(
                                             actuated=training_options['actuated']
                                             )
 
-    residual_network.load_state_dict(model["model"])
+    residual_network.load_state_dict(model["model"], strict=False)
     print("The model saves at epoch", model["epoch"])
     print(residual_network.count_parameters())
     residual_network.eval()
@@ -143,7 +175,7 @@ def test_trajectory(
     training_set = CantileverDataset(
     training_options["training_set"],
     default_cantilever._q0,
-    f"cantilever_data_straight",
+    f"cantilever_data_new_straight",
     start_frame=training_options["start_frame"],
     end_frame=training_options["end_frame"],
     )
@@ -355,7 +387,7 @@ if __name__ == "__main__":
     weights = [0.05, 0.06, 0.07, 0.1, 0.09, 0.08, 0.11, 0.12, 0.15, 0.09, 0.13, 0.14, 0.16, 0.17, 0.2,0.18,0.22,0.21]
 
 
-    save_folder = f"training/test_refactor_element_zero_transformer_direct"
+    save_folder =  f"training/test_refactor_element_nonWeighted_try_unseparated_unconditioned_direct"
     sim_errors = []
     res_errors = []
     origin_errors = []
@@ -366,7 +398,7 @@ if __name__ == "__main__":
     os.makedirs(f"beam_longer/{save_folder.replace('training/', '')}", exist_ok=True)
     os.makedirs(f"beam_longer/{save_folder.replace('training/', '')}", exist_ok=True)
     os.makedirs(f"{save_folder}/longer_scaled", exist_ok=True)
-    for test_i in [13,14,15]: #[2,7,11,14,16]: 
+    for test_i in [2,7,11,14,16]: 
 
         youngs_modulus = 215856
         poissons_ratio = 0.45
@@ -382,8 +414,13 @@ if __name__ == "__main__":
         }
 
         cantilever = LongerCantileverEnv3d(42, 'beam_longer', hex_params)
-        hex_params['youngs_modulus'] = 240619.6  #810695.1
-        hex_params['poissons_ratio'] = 0.4951 #0.499
+        # hex_params['youngs_modulus'] = 109974.4 #296147.7  
+        # hex_params['poissons_ratio'] = 0.499 #0.3000 
+        # hex_params['youngs_modulus'] = 233756.7   #116260.6 #233756.7  
+        # hex_params['poissons_ratio'] = 0.4760 #0.499 #0.4760 
+
+        hex_params['youngs_modulus'], hex_params['poissons_ratio'] = get_test_params(save_folder)
+
         cantilever_sim = LongerCantileverEnv3d(42, 'beam', hex_params)
         q_init = torch.from_numpy(cantilever._q0)
         q0 = torch.from_numpy(cantilever._q0)

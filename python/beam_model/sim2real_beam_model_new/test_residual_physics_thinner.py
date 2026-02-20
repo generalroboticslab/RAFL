@@ -486,3 +486,4 @@ if __name__ == "__main__":
     print(f"origin error {origin_error_mean.mean() * 1000:.3f}mm +-  {origin_errors.mean(-1).flatten().std() * 1000:.3f} mm")
     np.save(f"{save_folder}/thinner/sim_errors_residual_network.npy", sim_errors)
     np.save(f"{save_folder}/thinner/res_errors_residual_network.npy", res_errors)
+    np.save(f"{save_folder}/thinner/origin_errors_residual_network.npy", origin_errors)

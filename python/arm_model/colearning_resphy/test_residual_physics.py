@@ -74,7 +74,11 @@ def test_trajectory(
                                                 hidden_size=training_options['hidden_size'],
                                                 num_hidden_layer=training_options['num_hidden_layer'],
                                                 actuated=training_options['actuated'],
-                                                force_nodes=torch.tensor(force_nodes)
+                                                force_nodes=torch.tensor(force_nodes),
+                                                normalize_inputs=training_options['normalize_inputs'] if 'normalize_inputs' in training_options else True,
+                                                separated=training_options['separated'] if 'separated' in training_options else True,
+                                                conditioned=training_options['conditioned'] if 'conditioned' in training_options else True,
+                                                stress=training_options['stress'] if 'stress' in training_options else False
                                                 )
     model = torch.load(f"{save_folder}/residual_network.pth")
     model_input = f"residual_network"
@@ -445,7 +449,7 @@ if __name__ == "__main__":
             for lr in lrs:
                 for step in steps:
                     for gamma in gammas:
-                        save_folder = f"training/test_refactor_element_transformer" #f"hyperparam_search/learning_rate_1.000E-03_numblocks_5_num_layers_3_hidden_size_512"
+                        save_folder = f"training/test_refactor_element_transformer_direct" #f"hyperparam_search/learning_rate_1.000E-03_numblocks_5_num_layers_3_hidden_size_512"
                         sim_errors = []
                         res_errors = []
                         for i in range(180,200):

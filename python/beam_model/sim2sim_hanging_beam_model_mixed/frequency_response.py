@@ -105,9 +105,9 @@ def run_sim(hex_params,  mode, frequency, amplitude=0.0005, prepare = 1000, fram
             non_boundary_indices.extend([i, i+1, i+2])
     
     if mode == "stiff":
-        params_arr = np.zeros(num_elements)
-    elif mode == "soft":
         params_arr = np.ones(num_elements)
+    elif mode == "soft":
+        params_arr = np.zeros(num_elements)
     elif mode == "topSoft":
         vert_num = mesh.NumOfVertices()
         verts = np.array([np.array(mesh.py_vertex(i)) for i in range(vert_num)])
@@ -117,9 +117,9 @@ def run_sim(hex_params,  mode, frequency, amplitude=0.0005, prepare = 1000, fram
             element = mesh.py_element(e)
             vertices = np.array([mesh.py_vertex(v) for v in element])
             if vertices[:,2].mean() > mid_z:
-                material_mode.append(1.0)
-            else:
                 material_mode.append(0.0)
+            else:
+                material_mode.append(1.0)
         params_arr = np.array(material_mode)
     elif mode == "topStiff":
         vert_num = mesh.NumOfVertices()
@@ -130,9 +130,9 @@ def run_sim(hex_params,  mode, frequency, amplitude=0.0005, prepare = 1000, fram
             element = mesh.py_element(e)
             vertices = np.array([mesh.py_vertex(v) for v in element])
             if vertices[:,2].mean() > mid_z:
-                material_mode.append(0.0)
-            else:
                 material_mode.append(1.0)
+            else:
+                material_mode.append(0.0)
         params_arr = np.array(material_mode)
 
     params = torch.tensor(params_arr)
@@ -195,12 +195,12 @@ if __name__ == "__main__":
             }
 
 
-    mode = "stiff"
+    mode = "soft"
     frequencies = list(range(1,41))
     max_amplitudes = []
     for f in tqdm(frequencies[::-1]):
 
-        max_amplitude = run_sim(hex_params, mode=mode, frequency=f)
+        max_amplitude = run_sim(hex_params, mode=mode, frequency=f, prepare = 1000 * (40 // f), frame_num=1000 * (40 // f))
 
         max_amplitudes.append(max_amplitude)
     

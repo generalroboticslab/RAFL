@@ -1110,33 +1110,36 @@ class ElementResidual(nn.Module):
         r_e = (r_mult * h_e).expand(B, E, Q, 1)                                                     # (B,E,Q,1)
         #print(h_e.squeeze())
 
-        if self.force_nodes is not None:
-            q = q[:,self.force_nodes,:]
-            f = f[:,self.force_nodes,:]
+        # if self.force_nodes is not None:
+        #     q = q[:,self.force_nodes,:]
+        #     f = f[:,self.force_nodes,:]
 
-        # Element Sample Distance to closest Forced Nodes
-        P  = q_e.reshape(B, E * Q, 3)                                                               # (B,E*Q,3) 
-        dists = torch.zeros(B, E*Q,q.shape[1], dtype = P.dtype, device = P.device)
+        # # Element Sample Distance to closest Forced Nodes
+        # P  = q_e.reshape(B, E * Q, 3)                                                               # (B,E*Q,3) 
+        # dists = torch.zeros(B, E*Q,q.shape[1], dtype = P.dtype, device = P.device)
 
-        batch_size = 256
-        for batch in range(B//batch_size):
-            dists[:,batch_size * batch: min(batch_size * batch + 1, E*Q),:] = torch.cdist(P[:,batch_size * batch: min(batch_size * batch + 1, E*Q),:], q, p=2)                                                              # (B,E*Q,V)
-        kmin_dists, kmin_idx = torch.topk(dists, k=k, dim=2, largest=False)                         # (B,E*Q,k)
+        # batch_size = 256
+        # for batch in range(B//batch_size):
+        #     dists[:,batch_size * batch: min(batch_size * batch + 1, E*Q),:] = torch.cdist(P[:,batch_size * batch: min(batch_size * batch + 1, E*Q),:], q, p=2)                                                              # (B,E*Q,V)
+        # kmin_dists, kmin_idx = torch.topk(dists, k=k, dim=2, largest=False)                         # (B,E*Q,k)
         
-        # Scale Sample Distance by Radii
-        rb = r_e.reshape(B, E * Q, 1)                                                               # (B,E*Q,1)
-        qn = kmin_dists / rb.clamp_min(eps)                                                              # (B,E*Q,V)
+        # # Scale Sample Distance by Radii
+        # rb = r_e.reshape(B, E * Q, 1)                                                               # (B,E*Q,1)
+        # qn = kmin_dists / rb.clamp_min(eps)                                                              # (B,E*Q,V)
 
-        # Weigh the force by scaled distance
-        wi = torch.where(kmin_dists <= rb, self._wendland_c2(qn), torch.zeros_like(qn))                  # (B,E*Q,V)
-        phi = wi / wi.sum(dim=2, keepdim=True).clamp_min(eps)                                       # (B,E*Q,V)
-        _, V, _ = f.shape
-        f_expanded = f.unsqueeze(1).expand(B,E*Q,V,3)                                               # (B,E*Q,V,3)
-        f_neighbors = torch.gather(f_expanded, 2, kmin_idx.unsqueeze(-1).expand(B, E*Q, k, 3))      # (B,E*Q,k,3)
-        f_q = torch.einsum('bmf,bmfi->bmi', phi, f_neighbors)                                       # (B,E*Q,3)
-        #f_q = torch.einsum('bmf,bmfi->bmi', phi, f_expanded)                                        # (B,E*Q,3)
+        # # Weigh the force by scaled distance
+        # wi = torch.where(kmin_dists <= rb, self._wendland_c2(qn), torch.zeros_like(qn))                  # (B,E*Q,V)
+        # phi = wi / wi.sum(dim=2, keepdim=True).clamp_min(eps)                                       # (B,E*Q,V)
+        # _, V, _ = f.shape
+        # f_expanded = f.unsqueeze(1).expand(B,E*Q,V,3)                                               # (B,E*Q,V,3)
+        # f_neighbors = torch.gather(f_expanded, 2, kmin_idx.unsqueeze(-1).expand(B, E*Q, k, 3))      # (B,E*Q,k,3)
+        # f_q = torch.einsum('bmf,bmfi->bmi', phi, f_neighbors)                                       # (B,E*Q,3)
+        # #f_q = torch.einsum('bmf,bmfi->bmi', phi, f_expanded)                                        # (B,E*Q,3)
 
-        # Add gravitational force
+        # # Add gravitational force
+
+        f_e = self.to_elements(f)                                                                   # (B,E,Ne,3)
+        f_q = torch.einsum('beni,eqn->beqi', f_e, self.N_q.to(q.dtype))                             # (B,E,Q,3)
         f_e = f_q.view(B, E, Q, 3) + m * self.g.reshape(1,1,1,3)                                    # (B,E,Q,3)
 
         rho = self.rho.reshape(1,E,1,1)                                                             # (1,E,1,1)                                                                       

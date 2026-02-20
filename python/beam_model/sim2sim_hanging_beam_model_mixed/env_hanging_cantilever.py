@@ -29,7 +29,7 @@ class HangingCantileverEnv3d (EnvBase):
             options["youngs_modulus_1"] if "youngs_modulus_1" in options else 500000 #96500#
         )
         poissons_ratio_1 = (
-            options["poissons_ratio_1"] if "poissons_ratio_1" in options else 0.499#0.42
+            options["poissons_ratio_1"] if "poissons_ratio_1" in options else 0.42
         )
 
         # Liquid
@@ -37,7 +37,7 @@ class HangingCantileverEnv3d (EnvBase):
             options["youngs_modulus_2"] if "youngs_modulus_2" in options else 4000000 #28600 #
         )
         poissons_ratio_2 = (
-            options["poissons_ratio_2"] if "poissons_ratio_2" in options else 0.499#0.45
+            options["poissons_ratio_2"] if "poissons_ratio_2" in options else 0.45
         )
 
         state_force_parameters = (

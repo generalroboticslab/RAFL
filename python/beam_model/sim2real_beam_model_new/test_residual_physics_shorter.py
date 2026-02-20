@@ -348,7 +348,7 @@ if __name__ == "__main__":
     weights = [0.05, 0.06, 0.07, 0.1, 0.09, 0.08, 0.11, 0.12, 0.15, 0.09, 0.13, 0.14, 0.16, 0.17, 0.2,0.18,0.22,0.21]
 
 
-    save_folder =  f"training/test_refactor_element_thinner_scaled_direct"
+    save_folder =  f"training/test_refactor_element_direct"
     sim_errors = []
     sim_2_errors = []
     res_errors = []

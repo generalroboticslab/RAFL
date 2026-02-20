@@ -156,7 +156,7 @@ class FishTailEnv3d (EnvBase):
         assert cell_nums[0] * dx == 0.10 and cell_nums[1] * dx == 0.08 and cell_nums[2] * dx == 0.03, "Refinement does not properly divide the cantilever dimensions!" 
         origin = ndarray([0.0, 0.0, 0.0])
 
-        bin_file_name = folder + "mesh.bin"
+        bin_file_name = folder + "/mesh.bin"
         bin_file_name = Path(bin_file_name)
         voxels = generate_fish_tail(nx=cell_nums[0], ny=cell_nums[1], nz=cell_nums[2])
         generate_hex_mesh(voxels, dx, origin, bin_file_name)

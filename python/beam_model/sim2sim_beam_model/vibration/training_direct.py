@@ -325,7 +325,7 @@ if __name__ == "__main__":
     cantilever = CantileverEnv3d(42, 'beam', hex_params)
     q_init = torch.from_numpy(cantilever._q0)
 
-    save_folder = f"training/test_refactor_direct_element_nonWeighted_try_unseparated_unconditioned_noSpin_direct"
+    save_folder = f"training/test_refactor_element_direct"
     os.makedirs(f"{save_folder}", exist_ok=True)
 
     config["data_folder"] = save_folder.replace("training/", "")

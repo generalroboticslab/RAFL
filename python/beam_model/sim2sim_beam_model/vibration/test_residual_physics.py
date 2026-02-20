@@ -63,7 +63,7 @@ def test_trajectory(
         lam = ndarray(lam)
         rho = ndarray(rho)
 
-        residual_network = UpdatedElementResidual(cantilever._dofs, 
+        residual_network = ElementResidual(cantilever._dofs, 
                                             torch.tensor(elements), 
                                             torch.tensor(surface_faces), 
                                             torch.tensor(mu), 
@@ -73,51 +73,8 @@ def test_trajectory(
                                             0.01,
                                             hidden_size=training_options['hidden_size'],
                                             num_hidden_layer=training_options['num_hidden_layer'],
-                                            actuated=training_options['actuated'],
-                                            normalize_inputs=training_options['normalize_inputs'] if 'normalize_inputs' in training_options else True,
-                                            separated=training_options['separated'] if 'separated' in training_options else True,
-                                            conditioned=training_options['conditioned'] if 'conditioned' in training_options else True,
-                                            stress=training_options['stress'] if 'strress' in training_options else False
                                             )
-    elif training_options['model'] == 'element_old':
-        youngs_modulus = 215856
-        poissons_ratio = 0.45
-        la = (
-            youngs_modulus
-            * poissons_ratio
-            / ((1 + poissons_ratio) * (1 - 2 * poissons_ratio))
-        )
-        m = youngs_modulus / (2 * (1 + poissons_ratio))
 
-        mesh = cantilever._deformable.mesh()
-
-        elements = []
-        mu = []
-        lam = []
-        rho = []
-        num_elements = mesh.NumOfElements()
-        for e in range(num_elements):
-            elements.append(mesh.py_element(e))
-            mu.append(m)
-            lam.append(la)
-            rho.append(cantilever._deformable.density())
-        
-        elements = ndarray(elements)
-        mu = ndarray(mu)
-        lam = ndarray(lam)
-        rho = ndarray(rho)
-
-        residual_network = OldElementResidual(cantilever._dofs, 
-                                            torch.tensor(elements), 
-                                            torch.tensor(mu), 
-                                            torch.tensor(lam), 
-                                            torch.tensor(rho),
-                                            cantilever._q0, 
-                                            0.01,
-                                            hidden_size=training_options['hidden_size'],
-                                            num_hidden_layer=training_options['num_hidden_layer'],
-                                            actuated=training_options['actuated']
-                                            )
     model_input = f"residual_network"
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

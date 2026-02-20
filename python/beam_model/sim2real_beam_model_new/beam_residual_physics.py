@@ -16,8 +16,7 @@ from model import SupervisedLearningForward, PhysicsForward, LearningFoward
 from residual_physics.residual_physics import ResidualPhysicsBase
 from residual_physics.network import ResMLPResidual2, MLPResidual
 from validate_residual_physics import main as validate_main
-from residual_physics.element_force_update import ElementResidual as UpdatedElementResidual
-from residual_physics.element_force import ElementResidual as OldElementResidual
+from residual_physics.element_force_update import ElementResidual 
 from py_diff_pd.common.common import ndarray
 from py_diff_pd.common.hex_mesh import get_boundary_face
 
@@ -62,7 +61,7 @@ class CantileverResidualPhysics(ResidualPhysicsBase):
 
             self.scaling = len(elements) * 8
 
-            self.residual_network = UpdatedElementResidual(diffpd_model._dofs, 
+            self.residual_network = ElementResidual(diffpd_model._dofs, 
                                                     torch.tensor(elements), 
                                                     torch.tensor(surface_faces), 
                                                     torch.tensor(mu), 
@@ -72,50 +71,8 @@ class CantileverResidualPhysics(ResidualPhysicsBase):
                                                     0.01,
                                                     hidden_size=config['hidden_size'],
                                                     num_hidden_layer=config['num_hidden_layer'],
-                                                    actuated=config['actuated'],
-                                                    normalize_inputs=config['normalize_inputs'] if 'normalize_inputs' in config else True,
-                                                    separated=config['separated'] if 'separated' in config else True,
-                                                    conditioned=config['conditioned'] if 'conditioned' in config else True,
                                                     )
-        elif config["model"] == "element_old":
-            self.model_type = 'element'
-            la = (
-                diffpd_model._youngs_modulus
-                * diffpd_model._poissons_ratio
-                / ((1 + diffpd_model._poissons_ratio) * (1 - 2 * diffpd_model._poissons_ratio))
-            )
-            m = diffpd_model._youngs_modulus / (2 * (1 + diffpd_model._poissons_ratio))
-
-            mesh = diffpd_model._deformable.mesh()
-
-            elements = []
-            mu = []
-            lam = []
-            rho = []
-            num_elements = mesh.NumOfElements()
-            for e in range(num_elements):
-                elements.append(mesh.py_element(e))
-                mu.append(m)
-                lam.append(la)
-                rho.append(diffpd_model._deformable.density())
-            
-
-            elements = ndarray(elements)
-            mu = ndarray(mu)
-            lam = ndarray(lam)
-            rho = ndarray(rho)
-
-            self.residual_network = OldElementResidual(diffpd_model._dofs, 
-                                                    torch.tensor(elements), 
-                                                    torch.tensor(mu), 
-                                                    torch.tensor(lam), 
-                                                    torch.tensor(rho), 
-                                                    diffpd_model._q0, 
-                                                    0.01,
-                                                    hidden_size=config['hidden_size'],
-                                                    num_hidden_layer=config['num_hidden_layer'],
-                                                    actuated=config['actuated']
-                                                    )
+    
 
         # Initialize dataset
         training_set_index = config["training_set"]
@@ -180,11 +137,9 @@ class CantileverResidualPhysics(ResidualPhysicsBase):
         validation_set,
         validation_loader,
     ):
-        #f_mean, f_std = torch.mean(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
+
         f_mean, f_std = torch.zeros(training_set.q_init.shape[0]).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
-        #f_mean, f_std = torch.zeros(training_set.q_init.shape[0]).flatten(), torch.max(training_set.fs.view(-1,3).norm(dim=1), dim=0)[0].expand(training_set.q_init.shape[0])
-        #f_mean, f_std = torch.zeros(training_set.q_init.shape[0]).flatten(), torch.mean(torch.abs(training_set.fs.view(-1,3)), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
-        #print(f_std[:3])
+
         device = self.device
         with tqdm(total=self.epochs) as qbar:
             start_time = time.time()
@@ -225,12 +180,7 @@ class CantileverResidualPhysics(ResidualPhysicsBase):
                                 f_optimized,
                             )
                     else:
-                        # (
-                        #     f_optimized,
-                        # ) = training_set.normalize(
-                        #     None,None,
-                        #     f_optimized, (None, None, None, None, f_mean, f_std)
-                        # )
+                    
                         q_start_batch = q_start_batch + training_set.q_init.unsqueeze(0)
                     q_start_batch = q_start_batch.to(device)
                     v_start_batch = v_start_batch.to(device)
@@ -298,12 +248,7 @@ class CantileverResidualPhysics(ResidualPhysicsBase):
                                     f_optimized,
                                 )
                         else:
-                            # (
-                            #     f_optimized,
-                            # ) = training_set.normalize(
-                            #     None,None,
-                            #     f_optimized, (None, None, None, None, f_mean, f_std)
-                            # )
+                           
                             q_start_batch = q_start_batch + training_set.q_init.unsqueeze(0)
                         q_start_batch = q_start_batch.to(device)
                         v_start_batch = v_start_batch.to(device)

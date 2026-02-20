@@ -42,9 +42,9 @@ def system_identification ( trajectories, num_frames, dt, verbose=False, folder=
     # opt = { 'max_pd_iter': 1000, 'max_ls_iter': 10, 'abs_tol': 1e-6, 'rel_tol': 1e-3, 'verbose': 0, 'thread_ct': 16, 'use_bfgs': 1, 'bfgs_history_size': 10 }
 
     ### Start Optimization
-    x_lb = np.array([np.log(.5e5)]) #, 0.3])
-    x_ub = np.array([np.log(1e7)]) #, 0.499])
-    x_init = np.array([np.log(2e5)]) #, 0.4])    # 258321.2 # 263824
+    x_lb = np.array([np.log(1.5e5), 0.3])
+    x_ub = np.array([np.log(1e7), 0.499])
+    x_init = np.array([np.log(2e5), 0.4])    # 258321.2 # 263824
     x_bounds = scipy.optimize.Bounds(x_lb, x_ub)
 
     ### Only optimize for Young's Modulus
@@ -60,7 +60,7 @@ def system_identification ( trajectories, num_frames, dt, verbose=False, folder=
     def loss_and_grad (x):
         ### Initialize Environment
         E = np.exp(x[0])
-        nu = .499 #x[1]
+        nu = x[1]
         E_list.append(E)
         nu_list.append(nu)
         #print(E)
@@ -107,7 +107,7 @@ def system_identification ( trajectories, num_frames, dt, verbose=False, folder=
             # Compute gradient
             param_grad = np. array([
                 0.1 * info['material_parameter_gradients'][0] * np.exp(x)[0],
-                #info['material_parameter_gradients'][1],
+                info['material_parameter_gradients'][1],
             ])
 
             total_loss += loss
@@ -135,8 +135,8 @@ def system_identification ( trajectories, num_frames, dt, verbose=False, folder=
         result = scipy.optimize.basinhopping(loss_and_grad, np.copy(x_init), niter=5, T=1e-9, stepsize=0.05, minimizer_kwargs={'method': 'L-BFGS-B', 'jac': True, 'bounds': x_bounds, 'options': { 'ftol': 1e-8, 'gtol': 1e-6, 'maxiter': 5 }}, disp=True)
 
         E_opt = np.exp(result.x[0])
-        #nu_opt = result.x[1]
-        nu_opt = 0.499
+        nu_opt = result.x[1]
+
         print(f"Optimization time: {time.time()-t0:6.2f}s")
 
     finally: 
@@ -259,7 +259,7 @@ if __name__ == "__main__":
     test_trajectories = [2, 7, 11, 14, 16]
     #test_trajectories = trajectories
     num_frames = 140
-    folder = "SysID_beam_damping_longer_scaled"
+    folder = "SysID_beam_both_longer_scaled"
     os.makedirs(folder, exist_ok=True)
     ### Loading Real Data
     # print(steady_state)

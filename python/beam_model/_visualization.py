@@ -149,6 +149,7 @@ def plot_trajectory(
     sim_markers,
     res_markers,
     origin_markers,
+    sim_2_markers,
     test_data_idx,
     real_frames,
     dt,
@@ -167,9 +168,10 @@ def plot_trajectory(
             linestyle="-",
             marker="o",
             markersize=0.5,
-            label=f"SysID",
+            label=f"SysID (Both)",
             linewidth=2.0,
         )
+
     ax.plot(
         times,
         res_markers[:real_frames, :, dim].mean(1), #-offset,
@@ -198,6 +200,17 @@ def plot_trajectory(
         label=f"Original",
         linewidth=2.0,
     )
+
+    if sim_2_markers is not None:
+        ax.plot(
+            times,
+            sim_2_markers[:real_frames, :, dim].mean(1), #-offset,
+            linestyle="-",
+            marker="o",
+            markersize=0.5,
+            label=f"SysID (YM Only)",
+            linewidth=2.0,
+        )
 
     # ax.set_title(f"z axis")
     ax.set_xlabel("Time (s)")

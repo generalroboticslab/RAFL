@@ -1,1 +1,0 @@
-Outputs are stored in this folder, including models and loss curves.

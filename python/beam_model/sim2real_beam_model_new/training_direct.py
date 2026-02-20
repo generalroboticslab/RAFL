@@ -71,11 +71,6 @@ def train(
                                             0.01,
                                             hidden_size=training_options['hidden_size'],
                                             num_hidden_layer=training_options['num_hidden_layer'],
-                                            actuated=training_options['actuated'],
-                                            normalize_inputs=training_options['normalize_inputs'],
-                                            separated=training_options['separated'] if 'separated' in training_options else True,
-                                            conditioned=training_options['conditioned'] if 'conditioned' in training_options else True,
-                                            stress=training_options['stress'] if 'stress' in training_options else False
                                             )
 
     model_input = f"residual_network"
@@ -134,9 +129,6 @@ def train(
                 optimizer.zero_grad()
                 total_loss = []
                 for frame_i in range(1, end_frame):
-                    # if epoch < 10:
-                    #     q = target_trajectory_q[frame_i - 1].detach().clone()
-                    #     v = target_trajectory_v[frame_i - 1].detach().clone()
                     try:
                         if normalize:
                             if 'element' in training_options['model']:
@@ -165,7 +157,6 @@ def train(
                                 res_force_normalized = residual_network(
                                      torch.cat((q - q_init, v), dim=0).expand(1, -1).to(device)
                                 )[0]
-                            # res_force = training_set.denormalize(f=res_force_normalized.cpu(), normalization_params=(None, None, None, None, f_mean, f_std))[0]
                             res_force = res_force_normalized.cpu()
 
                         q, v = cantilever.forward(q, v, f_ext=res_force, dt=0.01)
@@ -180,15 +171,11 @@ def train(
 
                         
                     except Exception as e:
-                        # Get the exception type name and message
                         exception_type = type(e).__name__
                         exception_message = str(e)
                         print(f"An error of type '{exception_type}' occurred: {exception_message}")
-                        # Output: An error of type 'NameError' occurred: name 'x' is not defined
                         print("Failed full trajectory")
                         break
-
-                # total_loss = (torch.pow(decay_rate_cycle[epoch % 10], torch.arange(len(total_loss))) * torch.stack(total_loss)).mean() 
 
                 total_loss = training_options["scale"] * torch.stack(total_loss).mean() 
                 total_loss.backward()
@@ -216,9 +203,6 @@ def train(
 
                     total_loss = []
                     for frame_i in range(1, end_frame):
-
-                        # q = target_trajectory_q[frame_i - 1].detach().clone()
-                        # v = target_trajectory_v[frame_i - 1].detach().clone()
                         try:
 
                             if normalize:
@@ -248,7 +232,6 @@ def train(
                                     res_force_normalized = residual_network(
                                         torch.cat((q - q_init, v), dim=0).expand(1, -1).to(device)
                                     )[0]
-                                # res_force = training_set.denormalize(f=res_force_normalized.cpu(), normalization_params=(None, None, None, None, f_mean, f_std))[0]
                                 res_force = res_force_normalized.cpu()
                             q, v = cantilever.forward(q, v, f_ext=res_force, dt=0.01)
                             qx = q.reshape(-1,3)
@@ -262,7 +245,6 @@ def train(
                             exception_type = type(e).__name__
                             exception_message = str(e)
                             print(f"An error of type '{exception_type}' occurred: {exception_message}")
-                            # Output: An error of type 'NameError' occurred: name 'x' is not defined
                             print("Failed")
                             break
 
@@ -345,7 +327,7 @@ if __name__ == "__main__":
     cantilever = CantileverEnv3d(42, 'beam', hex_params)
     q_init = torch.from_numpy(cantilever._q0)
 
-    save_folder = f"training/test_refactor_directelement_nonWeighted_try_unseparated_unconditioned_noSpin_direct"
+    save_folder = f"training/test_refactor_element_direct"
     os.makedirs(f"{save_folder}", exist_ok=True)
     
     config["data_folder"] = save_folder.replace("training/", "")

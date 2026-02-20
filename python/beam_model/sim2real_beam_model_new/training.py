@@ -35,21 +35,18 @@ if __name__ == "__main__":
         config["validate_set"] = [5, 15]
 
         config["cuda"] = 5
-        config["normalize"] = False
+        config["normalize"] = True
         config["Inialization"] = 1e-3
-        config["scale"] = 1e3 #1#e3
+        config["scale"] = 1 #e3 
         config["data_type"] = "optimized"
         config["weight_decay"] = 1e-5
         config["fit"] = "forces"
-        config["model"] = "element"
-        config["hidden_size"] = 64
+        config["model"] = "skip_connection"
+        config["hidden_size"] = 512
         config["actuated"] = True
-        config["num_hidden_layer"] = 4
+        config["num_hidden_layer"] = 3
         config["num_mlp_blocks"] = 5
-        config["normalize_inputs"] = False
-        config["separated"] = False
-        config["conditioned"] = False
-        save_folder = f"training/test_refactor_element_nonWeighted_try_unseparated_unconditioned"
+        save_folder = f"training/test_refactor"
         config["data_folder"] = save_folder.replace("training/", "")
         cantilever_residual = CantileverResidualPhysics(config, save_folder, params)
         torch.manual_seed(config["seed"])

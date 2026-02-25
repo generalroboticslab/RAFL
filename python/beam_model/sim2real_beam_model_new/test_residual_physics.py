@@ -117,7 +117,7 @@ def test_trajectory(
 
     residual_network.load_state_dict(model["model"], strict='element' not in training_options['model'])
     print("The model saves at epoch", model["epoch"])
-    print(residual_network.count_parameters())
+    print("Number of Parameters: ", residual_network.count_parameters()) 
     residual_network.eval()
 
     ground_truth = np.load(

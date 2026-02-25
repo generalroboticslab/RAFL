@@ -327,7 +327,7 @@ if __name__ == "__main__":
         'refinement': 1,
     }
 
-    save_folder =  "training/test_refactor_element_nonWeighted_try_unseparated_unconditioned_direct"
+    save_folder =  "training/test_refactor_element_direct"
     os.makedirs(f"{save_folder}/thinner_scaled/", exist_ok=True)
     os.makedirs(f"{save_folder}/thinner_scaled/visualizations", exist_ok=True)
     os.makedirs(f"{save_folder}/thinner_scaled/visualizations/residual", exist_ok=True)

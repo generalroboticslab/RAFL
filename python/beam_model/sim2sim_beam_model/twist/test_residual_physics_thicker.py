@@ -291,7 +291,7 @@ if __name__ == "__main__":
     default_cantilever = CantileverEnv3d(42, 'beam', hex_params)
     q_init = torch.from_numpy(cantilever._q0)
 
-    save_folder = "training/test_refactor_element_nonWeighted_try_unseparated_unconditioned_direct"
+    save_folder = "training/test_refactor_element_direct"
     os.makedirs(f"{save_folder}/thicker/", exist_ok=True)
     sim_errors = []
     res_errors = []

@@ -333,7 +333,7 @@ if __name__ == "__main__":
         'refinement': 1,
     }
 
-    save_folder = "training/test_refactor_direct_element_nonWeighted_try_unseparated_unconditioned_noSpin_direct" #_stress_direct"
+    save_folder = "training/test_refactor_element_direct" 
     os.makedirs(f"{save_folder}/fishTail/", exist_ok=True)
     os.makedirs(f"{save_folder}/fishTail/visualizations", exist_ok=True)
     os.makedirs(f"{save_folder}/fishTail/visualizations/residual", exist_ok=True)
@@ -365,6 +365,6 @@ if __name__ == "__main__":
     np.save(f"{save_folder}/fishTail/res_errors_residual_network.npy", sim_errors)
     np.save(f"{save_folder}/fishTail/res_errors_residual_network.npy", res_errors)
 
-    generate_video_directory(f"{save_folder}/fishTail/visualizations/residual", list(range(12,20)), flag="")
-    generate_video_directory(f"{save_folder}/fishTail/visualizations/base", list(range(12,20)), flag="")
+    # generate_video_directory(f"{save_folder}/fishTail/visualizations/residual", list(range(12,20)), flag="")
+    # generate_video_directory(f"{save_folder}/fishTail/visualizations/base", list(range(12,20)), flag="")
 

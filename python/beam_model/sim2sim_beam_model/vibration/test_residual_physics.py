@@ -14,8 +14,7 @@ from _utils import CantileverDataset
 from _visualization import plot_trajectory, plot_forces_norm
 from env_cantilever import CantileverEnv3d
 from residual_physics.network import ResMLPResidual2, MLPResidual
-from residual_physics.element_force_update import ElementResidual as UpdatedElementResidual
-from residual_physics.element_force import ElementResidual as OldElementResidual
+from residual_physics.element_force_update import ElementResidual
 from py_diff_pd.common.common import ndarray
 from video_generation import *
 from py_diff_pd.common.hex_mesh import get_boundary_face
@@ -93,6 +92,7 @@ def test_trajectory(
     dofs = cantilever._dofs
     residual_network.load_state_dict(model["model"], strict=False)
     print("The model saves at epoch", model["epoch"])
+    print("Number of Parameters: ", residual_network.count_parameters()) 
     residual_network.eval()
 
     ground_truth = np.load(
@@ -140,7 +140,6 @@ def test_trajectory(
     predicted_residual_force_norms = []
     ground_truth_residual_force_norms = []
     normalize = training_options["normalize"]
-    #f_mean, f_std = torch.mean(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
     f_mean, f_std = torch.zeros(training_set.q_init.shape[0]).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(training_set.q_init.shape[0] // 3, 3).flatten()
     sim_t = 0
     res_t = 0
@@ -151,8 +150,6 @@ def test_trajectory(
     # cantilever.display_mesh(q_res.detach(), f"{save_folder}/visualizations/residual/{test_data_idx}/0.png")
     # cantilever_sim.display_mesh(q_sim.detach(), f"{save_folder}/visualizations/base/{test_data_idx}/0.png")
 
-    print(torch.mean(training_set.fs.view(-1,3), dim=0))
-    print(f_std[:3])
     for frame_i in range(1, end_frame):
         if normalize:
 
@@ -281,6 +278,7 @@ def test_trajectory(
         None,
         qs_res,
         qs_sim,
+        None,
         test_data_idx,
         real_frames,
         dt,
@@ -310,9 +308,9 @@ if __name__ == "__main__":
         'mesh_type': 'hex',
         'refinement': 1,
     }
-    # save_folder = f"training/sim2simResMLP5"
-    save_folder = f"training/test_refactor_element_nonWeighted_try_unseparated_unconditioned_direct"
-    cantilever = CantileverEnv3d(42, save_folder, hex_params)
+
+    save_folder = f"training/test_refactor_element_direct"
+    cantilever = CantileverEnv3d(42, "beam", hex_params)
 
     os.makedirs(f"{save_folder}/visualizations", exist_ok=True)
     os.makedirs(f"{save_folder}/visualizations/residual", exist_ok=True)

@@ -14,8 +14,7 @@ from _visualization import plot_trajectory, plot_forces_norm
 from env_cantilever import CantileverEnv3d
 from env_cantilever_thicker_scaled import ThickerCantileverEnv3d
 from residual_physics.network import ResMLPResidual2, MLPResidual
-from residual_physics.element_force_update import ElementResidual as UpdatedElementResidual
-from residual_physics.element_force import ElementResidual as OldElementResidual
+from residual_physics.element_force_update import ElementResidual 
 from py_diff_pd.common.common import ndarray
 from video_generation import *
 from py_diff_pd.common.hex_mesh import get_boundary_face
@@ -64,7 +63,7 @@ def test_trajectory(
         lam = ndarray(lam)
         rho = ndarray(rho)
 
-        residual_network = UpdatedElementResidual(cantilever._dofs, 
+        residual_network = ElementResidual(cantilever._dofs, 
                                             torch.tensor(elements), 
                                             torch.tensor(surface_faces), 
                                             torch.tensor(mu), 
@@ -73,59 +72,16 @@ def test_trajectory(
                                             cantilever._q0, 
                                             [0.01,0.01333333,0.01333333],
                                             hidden_size=training_options['hidden_size'],
-                                            num_hidden_layer=training_options['num_hidden_layer'],
-                                            actuated=training_options['actuated'],
-                                            normalize_inputs=training_options['normalize_inputs'] if 'normalize_inputs' in training_options else True,
-                                            separated=training_options['separated'] if 'separated' in training_options else True,
-                                            conditioned=training_options['conditioned'] if 'conditioned' in training_options else True
+                                            num_hidden_layer=training_options['num_hidden_layer']
                                             )
-    elif training_options['model'] == 'element_old':
-        youngs_modulus = 215856
-        poissons_ratio = 0.45
-        la = (
-            youngs_modulus
-            * poissons_ratio
-            / ((1 + poissons_ratio) * (1 - 2 * poissons_ratio))
-        )
-        m = youngs_modulus / (2 * (1 + poissons_ratio))
-
-        mesh = cantilever._deformable.mesh()
-
-        elements = []
-        mu = []
-        lam = []
-        rho = []
-        num_elements = mesh.NumOfElements()
-        for e in range(num_elements):
-            elements.append(mesh.py_element(e))
-            mu.append(m)
-            lam.append(la)
-            rho.append(cantilever._deformable.density())
-        
-        elements = ndarray(elements)
-        mu = ndarray(mu)
-        lam = ndarray(lam)
-        rho = ndarray(rho)
-
-        residual_network = OldElementResidual(cantilever._dofs, 
-                                            torch.tensor(elements), 
-                                            torch.tensor(mu), 
-                                            torch.tensor(lam), 
-                                            torch.tensor(rho),
-                                            cantilever._q0, 
-                                            [0.01,0.01333333,0.01333333],
-                                            hidden_size=training_options['hidden_size'],
-                                            num_hidden_layer=training_options['num_hidden_layer'],
-                                            actuated=training_options['actuated']
-                                            )
-
+   
     model_input = args.parse_args().model
     model_input = f"residual_network"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"{save_folder}/{model_input}.pth")
     model = torch.load(f"{save_folder}/{model_input}.pth", map_location=device)
 
-    # create new OrderedDict that does not contain `module.`
+    # Only load neural network weights and not quadrature
     if 'element' in training_options['model']:
         from collections import OrderedDict
         new_state_dict = OrderedDict()
@@ -135,7 +91,7 @@ def test_trajectory(
                 new_state_dict[name] = v
         model['model'] = new_state_dict
 
-    residual_network.load_state_dict(model["model"], strict=False)
+    residual_network.load_state_dict(model["model"], strict='element' not in training_options['model'])
     print("The model saves at epoch", model["epoch"])
     residual_network.eval()
 
@@ -143,7 +99,6 @@ def test_trajectory(
         f"thicker_scaled_cantilever_data_sim2sim/optimized_data_{test_data_idx}.npy",
         allow_pickle=True,
     )[()]
-    #f_optimized = torch.from_numpy(ground_truth["optimized_forces"]).t()[1:]
     loss_fn = torch.nn.MSELoss(reduction="mean")
 
     if 'twist' in save_folder:
@@ -183,13 +138,12 @@ def test_trajectory(
     predicted_residual_force_norms = []
     ground_truth_residual_force_norms = []
     normalize = training_options["normalize"]
-    #f_mean, f_std = torch.mean(training_set.fs.view(-1,3), dim=0).expand(q0.shape[0] // 3, 3).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(q0.shape[0] // 3, 3).flatten()
     f_mean, f_std = torch.zeros(q0.shape[0]).flatten(), torch.std(training_set.fs.view(-1,3), dim=0).expand(q0.shape[0] // 3, 3).flatten()
     
-    Path(f"{save_folder}/thicker_scaled/visualizations/residual/{test_data_idx}").mkdir(parents=True, exist_ok=True)
-    Path(f"{save_folder}/thicker_scaled/visualizations/base/{test_data_idx}").mkdir(parents=True, exist_ok=True)
-    cantilever.display_mesh(q_res.detach(), f"{save_folder}/thicker_scaled/visualizations/residual/{test_data_idx}/0.png")
-    cantilever_sim.display_mesh(q_sim.detach(), f"{save_folder}/thicker_scaled/visualizations/base/{test_data_idx}/0.png")
+    # Path(f"{save_folder}/thicker_scaled/visualizations/residual/{test_data_idx}").mkdir(parents=True, exist_ok=True)
+    # Path(f"{save_folder}/thicker_scaled/visualizations/base/{test_data_idx}").mkdir(parents=True, exist_ok=True)
+    # cantilever.display_mesh(q_res.detach(), f"{save_folder}/thicker_scaled/visualizations/residual/{test_data_idx}/0.png")
+    # cantilever_sim.display_mesh(q_sim.detach(), f"{save_folder}/thicker_scaled/visualizations/base/{test_data_idx}/0.png")
 
     for frame_i in range(1, end_frame):
         if normalize:
@@ -216,16 +170,9 @@ def test_trajectory(
                 torch.cat((q_res, v_res), dim=0)
             )[0]
             res_force = res_force_normalized
-        #print(res_force.norm())
-        #print(f_optimized[frame_i - 1, :].norm())
-        #res_force_error = torch.norm(res_force - f_optimized[frame_i - 1, :])
-        #print(res_force_error)
-        #print()
+       
         predicted_residual_force_norms.append(torch.norm(res_force).item())
-        #res_force_errors.append(res_force_error.item())
-        # ground_truth_residual_force_norms.append(
-        #     torch.norm(f_optimized[frame_i - 1, :]).item()
-        # )
+       
         try:
             q_res, v_res = cantilever.forward(
                 q_res, v_res, f_ext=res_force, dt=0.01
@@ -238,36 +185,36 @@ def test_trajectory(
         qs_res.append(q_res.detach().numpy())
         vs_sim.append(v_sim.detach().numpy())
         vs_res.append(v_res.detach().numpy())
-        cantilever.display_mesh(q_res.detach(), f"{save_folder}/thicker_scaled/visualizations/residual/{test_data_idx}/{frame_i}.png")
-        cantilever_sim.display_mesh(q_sim.detach(), f"{save_folder}/thicker_scaled/visualizations/base/{test_data_idx}/{frame_i}.png")
+    #     cantilever.display_mesh(q_res.detach(), f"{save_folder}/thicker_scaled/visualizations/residual/{test_data_idx}/{frame_i}.png")
+    #     cantilever_sim.display_mesh(q_sim.detach(), f"{save_folder}/thicker_scaled/visualizations/base/{test_data_idx}/{frame_i}.png")
 
-    if normalize:
-        (
-            q_res_normalized,
-            v_res_normalized,
-        ) = training_set.normalize(q=q_res - q_init, v=v_res)
-        res_force_normalized = residual_network(
-            torch.cat(
-                (q_res_normalized, v_res_normalized),
-                dim=0,
-            ).expand(1, -1)
-        )[0]
-        res_force = training_set.denormalize(f=res_force_normalized)[0]
-    else:
-        res_force_normalized = residual_network(
-            torch.cat((q_res, v_res), dim=0)
-        )[0]
-        res_force = training_set.denormalize(f=res_force_normalized, normalization_params=(None, None, None, None, f_mean, f_std))[0]
-    try:
-        q_res, v_res = cantilever.forward(
-            q_res, v_res, f_ext=res_force, dt=0.01
-        )
-        q_sim, v_sim = cantilever_sim.forward(q_sim, v_sim, f_ext=torch.zeros_like(q_sim), dt=0.01)
+    # if normalize:
+    #     (
+    #         q_res_normalized,
+    #         v_res_normalized,
+    #     ) = training_set.normalize(q=q_res - q_init, v=v_res)
+    #     res_force_normalized = residual_network(
+    #         torch.cat(
+    #             (q_res_normalized, v_res_normalized),
+    #             dim=0,
+    #         ).expand(1, -1)
+    #     )[0]
+    #     res_force = training_set.denormalize(f=res_force_normalized)[0]
+    # else:
+    #     res_force_normalized = residual_network(
+    #         torch.cat((q_res, v_res), dim=0)
+    #     )[0]
+    #     res_force = training_set.denormalize(f=res_force_normalized, normalization_params=(None, None, None, None, f_mean, f_std))[0]
+    # try:
+    #     q_res, v_res = cantilever.forward(
+    #         q_res, v_res, f_ext=res_force, dt=0.01
+    #     )
+    #     q_sim, v_sim = cantilever_sim.forward(q_sim, v_sim, f_ext=torch.zeros_like(q_sim), dt=0.01)
 
-        cantilever.display_mesh(q_res.detach(), f"{save_folder}/thicker_scaled/visualizations/residual/{test_data_idx}/{end_frame}.png")
-        cantilever_sim.display_mesh(q_sim.detach(), f"{save_folder}/thicker_scaled/visualizations/base/{test_data_idx}/{end_frame}.png")
-    except:
-        pass
+    #     cantilever.display_mesh(q_res.detach(), f"{save_folder}/thicker_scaled/visualizations/residual/{test_data_idx}/{end_frame}.png")
+    #     cantilever_sim.display_mesh(q_sim.detach(), f"{save_folder}/thicker_scaled/visualizations/base/{test_data_idx}/{end_frame}.png")
+    # except:
+    #     pass
 
     np.save(f"{save_folder}/thicker_scaled/qs_sim_{test_data_idx}.npy", qs_sim)
     np.save(f"{save_folder}/thicker_scaled/qs_res_{test_data_idx}.npy", qs_res)
@@ -290,8 +237,7 @@ def test_trajectory(
     qs_ground_truth = qs_ground_truth.reshape(qs_ground_truth.shape[0], -1,3)
     sim_error = np.linalg.norm(qs_sim[:real_frames] - qs_ground_truth[:real_frames], axis=-1)
     res_error = np.linalg.norm(qs_res[:real_frames] - qs_ground_truth[:real_frames], axis=-1)
-    #predicted_residual_force_norms = np.array(predicted_residual_force_norms)
-    #res_force_errors = np.array(res_force_errors)
+
     print(
         f"test id {test_data_idx} sim error {sim_error.mean()*1e3:.3f}mm +-  {sim_error.mean(-1).std()*1e3:.3f} mm"
     )
@@ -306,18 +252,12 @@ def test_trajectory(
         None,
         qs_res,
         qs_sim,
+        None,
         test_data_idx,
         real_frames,
         dt,
     )
-    # plot_forces_norm(
-    #     vis_1d_folder,
-    #     test_data_idx,
-    #     figsize,
-    #     predicted_residual_force_norms,
-    #     ground_truth_residual_force_norms,
-    #     dt,
-    # )
+   
 
     return sim_error, res_error
 
@@ -335,11 +275,11 @@ if __name__ == "__main__":
         'mesh_type': 'hex',
         'refinement': 1,
     }
-    cantilever = ThickerCantileverEnv3d(42, 'thicker_beam', hex_params)
-    default_cantilever = CantileverEnv3d(42, 'thicker_beam', hex_params)
+    cantilever = ThickerCantileverEnv3d(42, 'beam_thicker_scaled', hex_params)
+    default_cantilever = CantileverEnv3d(42, 'beam', hex_params)
     q_init = torch.from_numpy(cantilever._q0)
 
-    save_folder = f"training/test_refactor_element_nonWeighted_try_unseparated_unconditioned_direct" 
+    save_folder = f"training/test_refactor_element_direct" 
     os.makedirs(f"{save_folder}/thicker_scaled/", exist_ok=True)
     os.makedirs(f"{save_folder}/thicker_scaled/visualizations", exist_ok=True)
     os.makedirs(f"{save_folder}/thicker_scaled/visualizations/residual", exist_ok=True)
@@ -366,6 +306,6 @@ if __name__ == "__main__":
     np.save(f"{save_folder}/thicker_scaled/res_errors_residual_network.npy", sim_errors)
     np.save(f"{save_folder}/thicker_scaled/res_errors_residual_network.npy", res_errors)
 
-    generate_video_directory(f"{save_folder}/thicker_scaled/visualizations/residual", [2,7,11,14,16], flag="")
-    generate_video_directory(f"{save_folder}/thicker_scaled/visualizations/base", [2,7,11,14,16], flag="")
+    # generate_video_directory(f"{save_folder}/thicker_scaled/visualizations/residual", [2,7,11,14,16], flag="")
+    # generate_video_directory(f"{save_folder}/thicker_scaled/visualizations/base", [2,7,11,14,16], flag="")
 

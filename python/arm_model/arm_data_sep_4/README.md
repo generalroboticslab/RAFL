@@ -1,1 +1,0 @@
-## This set of data are collected on Septemper 1st to 4th.

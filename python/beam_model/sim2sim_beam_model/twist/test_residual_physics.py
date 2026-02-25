@@ -356,7 +356,7 @@ if __name__ == "__main__":
         'refinement': 1,
     }
 
-    save_folder = f"training/test_refactor_element_nonWeighted_try_unseparated_unconditioned_direct"
+    save_folder = f"training/test_refactor_element_direct"
     cantilever = CantileverEnv3d(42, save_folder, hex_params)
 
     os.makedirs(f"{save_folder}/visualizations", exist_ok=True)

@@ -93,7 +93,7 @@ if __name__ == '__main__':
             'mesh_type': 'hex',
             'refinement': 1,
         }
-        cantilever = CantileverEnv3d(42, f'test{idx}', hex_params)
+        cantilever = CantileverEnv3d(42, f'data_real', hex_params)
 
         ########################################
         num_frames = 100

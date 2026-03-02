@@ -1,6 +1,6 @@
 # Residual Physics
 
-Note: this is a modified version of https://github.com/mit-gfx/diff_pd, with the purpose of learning residual physics of soft deformable objects.
+Note: this is a modified version of https://github.com/srl-ethz/residual_physics_sim2real.git and https://github.com/mit-gfx/diff_pd, with the purpose of learning residual physics of soft deformable objects.
 
 
 ## Recommended systems
@@ -10,8 +10,8 @@ Note: this is a modified version of https://github.com/mit-gfx/diff_pd, with the
 
 ## Installation
 ```
-git clone --recursive git@github.com:srl-ethz/residual_physics_sim2real.git
-cd residual_physics_sim2real
+git clone --recursive https://github.com/generalroboticslab/RAFL.git
+cd RAFL
 conda env create -f environment.yml
 conda activate residual_physics
 ./install.sh
@@ -26,18 +26,7 @@ sim2sim_beam_model: Sim-to-sim osicillating and twisting beam experiments; Marke
 
 sim2real_beam_model: Sim-to-real experiments for the cantilever beam.
 
-### arm_model
-
-Sim-to-real experiments for SoPrA.
-
 ### residual_physics
 
 Residual physics base class.
 
-### sim_free
-
-Purely data-driven baseline to compare against hybrid model-based residual physics.
-
-### paper_figures
-
-Experimental result data and plots in the paper.

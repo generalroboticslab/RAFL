@@ -1,6 +1,6 @@
 # Residual Physics
 
-Note: this is a modified version of https://github.com/srl-ethz/residual_physics_sim2real.git and https://github.com/mit-gfx/diff_pd, with the purpose of learning residual physics of soft deformable objects.
+Note: this is a modified version of https://github.com/srl-ethz/residual_physics_sim2real.git and https://github.com/mit-gfx/diff_pd, with the purpose of learning generalizable residual acceleration fields of soft deformable objects.
 
 
 ## Recommended systems
@@ -22,9 +22,9 @@ Navigate to python folder to one of the experiments below, detailed instructions
 
 ### beam_model
 
-sim2sim_beam_model: Sim-to-sim osicillating and twisting beam experiments; Marker ablation experiments.
+sim2sim_beam_model: Sim-to-sim vibrating and twisted beam experiments.
 
-sim2real_beam_model: Sim-to-real experiments for the cantilever beam.
+sim2real_beam_model_new: Sim-to-real experiments for the cantilever beam.
 
 ### residual_physics
 

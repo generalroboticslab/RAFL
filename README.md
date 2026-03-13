@@ -24,7 +24,7 @@ Navigate to python folder to one of the experiments below, detailed instructions
 
 sim2sim_beam_model: Sim-to-sim vibrating and twisted beam experiments.
 
-sim2real_beam_model_new: Sim-to-real experiments for the cantilever beam.
+sim2real_beam_model: Sim-to-real experiments for the cantilever beam.
 
 ### residual_physics
 

@@ -18,6 +18,8 @@
     ├── env_fishTail.py # Crude Fishtail DiffPD class.
     ├── env_fishTailMesh.py # Finer Fishtail DiffPD class.
 
+You can download sim2sim data from [Google drive](https://drive.google.com/drive/folders/16v8ItWT0kAm8PBaxGByvA-moDE78VFxq?usp=sharing) and put the subfolder data into the corresponding experimental folder to verify our result easily.
+
 For oscillating and twisting sim2sim experiments in `vibration` and `twist`:
 
     .

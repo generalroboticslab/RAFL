@@ -56,8 +56,8 @@
     └── README.md
 
 
-You can download Sim2real beam real data from [Google Drive](https://drive.google.com/drive/folders/1LnwYr0sBDyMs6rvVQbn1PKMmMCQAy-ky?usp=sharing)
-, where `weight_data_ordered` stores the collected raw data and `cantilver_data_fix_registration` stores the optimized full-state trajectories by `optimize_trajectory.py`.
+You can download Sim2real beam real data from [Google Drive](https://drive.google.com/drive/folders/16v8ItWT0kAm8PBaxGByvA-moDE78VFxq?usp=sharing)
+, where `data_new`, `data_longer`, `data_shorter`, `data_thicker`, `data_thinner` store the collected raw data and `cantilver_data_new_straight`, `cantilver_data_longer_straight`, `cantilver_data_longer_scaled_straight`, `cantilver_data_shorter_straight`, `cantilver_data_shorter_scaled_straight`, `cantilver_data_thicker_straight`, `cantilver_data_thicker_scaled_straight`, `cantilver_data_thinner_straight`, `cantilver_data_thinner_scaled_straight` store the optimized trajectories with optimized initial states and target forces where applicable.
 
 To run the complete residual physics framework, we first need to build augmented dataset by run `build_augmented_data.py`. Then we can run `training.py` to train the residual physics network. We save the best model performed on validation set as `residual_network.pth`. With the trained network, we can run `python test_residual_physics.py -model residual`.
 

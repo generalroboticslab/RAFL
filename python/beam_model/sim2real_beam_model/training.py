@@ -37,13 +37,12 @@ if __name__ == "__main__":
         config["cuda"] = 5
         config["normalize"] = True
         config["Inialization"] = 1e-3
-        config["scale"] = 1 #e3 
+        config["scale"] = 1  
         config["data_type"] = "optimized"
         config["weight_decay"] = 1e-5
         config["fit"] = "forces"
         config["model"] = "skip_connection"
         config["hidden_size"] = 512
-        config["actuated"] = True
         config["num_hidden_layer"] = 3
         config["num_mlp_blocks"] = 5
         save_folder = f"training/test_refactor"

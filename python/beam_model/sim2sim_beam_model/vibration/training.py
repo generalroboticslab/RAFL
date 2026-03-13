@@ -33,7 +33,7 @@ if __name__ == "__main__":
         config["seed"] = 42
         config["epochs"] = 1000
         config["batch_size"] = 256
-        config["learning_rate"] = 1e-3#5e-6
+        config["learning_rate"] = 1e-3
         config["optimizer"] = "adam"
         config["start_frame"] = 0
         config["end_frame"] = 150
@@ -41,24 +41,18 @@ if __name__ == "__main__":
         config["validate_set"] = [5, 15]
 
         config["cuda"] = 1
-        config["normalize"] = False #True
+        config["normalize"] = True
         config["Inialization"] = 1e-3
-        config["scale"] = 1e3 #1#e3
+        config["scale"] = 1
         config["data_type"] = "optimized"
         config["weight_decay"] = 1e-5
         config["fit"] = "forces"
-        # config["fit"] = "SITL"
-        config["model"] = "element"
-        # config["model"] = "skip_connection"
+        config["model"] = "skip_connection"
         config["num_mlp_blocks"] = 5
-        config["hidden_size"] = 64 #512
-        config["num_hidden_layer"] = 4 #3
-        config["actuated"] = True
-        config["normalize_inputs"] = False
-        config["separated"] = False
-        config["conditioned"] = False
-        # save_folder = f"training/sim2simResMLP5"
-        save_folder = f"training/test_refactor_element_nonWeighted_try_unseparated_unconditioned"
+        config["hidden_size"] = 512
+        config["num_hidden_layer"] = 3
+        config["normalize_inputs"] = True
+        save_folder = f"training/test_refactor"
         config["data_folder"] = save_folder.replace("training/", "")
         cantilever_residual = CantileverResidualPhysics(config, save_folder, params)
         torch.manual_seed(config["seed"])

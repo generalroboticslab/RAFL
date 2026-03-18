@@ -13,7 +13,7 @@ Duke University
 ## Overview
 This repo contains the PyTorch implementation for our paper "RAFL: Generalizable Sim-to-Real of Soft Robots with Residual Acceleration Field Learning".
 
-![teaser](asset/banner.pdf)
+![teaser](asset/banner.png)
 
 Note: this is a modified version of https://github.com/srl-ethz/residual_physics_sim2real.git and https://github.com/mit-gfx/diff_pd, with the purpose of learning generalizable residual acceleration fields of soft deformable objects.
 

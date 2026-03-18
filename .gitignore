@@ -8,7 +8,6 @@ sim2real_beam_model/weight_data_ordered/data_process.ipynb
 *.npy
 *.npz
 *.DS_Store
-*.png
 *.bin
 *.csv
 cantilever_data/*

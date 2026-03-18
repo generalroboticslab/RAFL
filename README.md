@@ -85,6 +85,7 @@ where ```shape``` can be the following
 - thinner_scaled: Thinner beam (scaled)
 - fishTail: Crude Fishtail
 - fishTailMesh: Finer Fishtail
+
 Target residual forces for the supervised residual learning baseline are NOT generated for generalization datasets, but target datasets are reformatted to allow compatibility with test code. 
 All raw trajectories will be stored under ```[shape]_data_real``` subdirectory and all target datasets will be stored under ```[shape]_data_sim2sim```.
 
@@ -161,6 +162,7 @@ where ```shape``` can be the following
 - thicker_scaled: Thicker beam (scaled)
 - thinner: Thinner beam (unscaled)
 - thinner_scaled: Thinner beam (scaled)
+
 Target residual forces for the supervised residual learning baseline are NOT generated for generalization datasets, and only initial states are generated. 
 All target datasets will be stored under ```cantilver_data_[shape]_straight```.
 

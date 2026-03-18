@@ -3,10 +3,7 @@
 [Dong Heon Cho*](http://dc3042.github.io),
 [Boyuan Chen](http://boyuanchen.com/)
 
-<br>
 Duke University
-<br>
-
 
 ### [Project Website](http://generalroboticslab.com/RAFL) | [Video]() | [Paper]()
 

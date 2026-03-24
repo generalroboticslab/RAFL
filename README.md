@@ -5,7 +5,7 @@
 
 Duke University
 
-### [Project Website](http://generalroboticslab.com/RAFL) | [Video]() | [Paper]()
+### [Project Website](http://generalroboticslab.com/RAFL) | [Video]() | [Paper](https://arxiv.org/abs/2603.22039v1)
 
 ## Overview
 This repo contains the PyTorch implementation for our paper "RAFL: Generalizable Sim-to-Real of Soft Robots with Residual Acceleration Field Learning".
@@ -19,7 +19,15 @@ Note: this is a modified version of https://github.com/srl-ethz/residual_physics
 If you find our paper or codebase helpful, please consider citing:
 
 ```
-PLACEHOLDER
+@misc{cho2026raflgeneralizablesimtorealsoft,
+      title={RAFL: Generalizable Sim-to-Real of Soft Robots with Residual Acceleration Field Learning}, 
+      author={Dong Heon Cho and Boyuan Chen},
+      year={2026},
+      eprint={2603.22039},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2603.22039}, 
+}
 
 ```
 

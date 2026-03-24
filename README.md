@@ -5,7 +5,7 @@
 
 Duke University
 
-### [Project Website](http://generalroboticslab.com/RAFL) | [Video]() | [Paper](https://arxiv.org/abs/2603.22039v1)
+### [Project Website](http://generalroboticslab.com/RAFL) | [Video](https://youtu.be/lS2fc4_8NfA?si=sBM_kzXX7rQUk0c7) | [Paper](https://arxiv.org/abs/2603.22039v1)
 
 ## Overview
 This repo contains the PyTorch implementation for our paper "RAFL: Generalizable Sim-to-Real of Soft Robots with Residual Acceleration Field Learning".
